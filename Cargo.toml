@@ -1,0 +1,8 @@
+[package]
+name = "cam_core"
+version = "0.1.0"
+authors = ["Cameron Wong <cjwong@andrew.cmu.edu>"]
+edition = "2018"
+
+[dependencies]
+error-chain = "0.12.1"
