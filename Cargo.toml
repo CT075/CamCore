@@ -5,4 +5,7 @@ authors = ["Cameron Wong <cjwong@andrew.cmu.edu>"]
 edition = "2018"
 
 [dependencies]
-error-chain = "0.12.1"
+failure = "0.1.6"
+failure_derive = "0.1.6"
+chomp = "0.3.1"
+
