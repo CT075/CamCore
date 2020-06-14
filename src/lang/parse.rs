@@ -1,19 +1,58 @@
+use crate::types::generic::PriorityStack;
 use crate::types::*;
 use ast::*;
 use nom::{
-    alt,
+    branch::alt,
     bytes::complete::{tag, take_until, take_while},
-    char,
-    character::complete::{alpha1, line_ending},
-    complete, many0, map, one_of, preceded, tag, IResult,
+    character::complete::{alpha1, char, digit1, hex_digit1, line_ending, one_of},
+    combinator::{map, opt},
+    multi::{many0, separated_list},
+    sequence::{delimited, preceded, terminated},
+    IResult,
 };
+
+use phf::phf_map;
+use std::cmp::Ordering;
 
 pub mod ast;
 
-#[cfg(test)]
-pub mod tests;
-
 type InStream<'a> = &'a str;
+
+struct OperatorPrec {
+    precedence: u32,
+    op: fn(Box<ParsedExpr>, Box<ParsedExpr>) -> ParsedExpr,
+}
+
+impl Ord for OperatorPrec {
+    fn cmp(&self, other: &OperatorPrec) -> Ordering {
+        self.precedence.cmp(&other.precedence)
+    }
+}
+impl Eq for OperatorPrec {}
+
+impl PartialOrd for OperatorPrec {
+    fn partial_cmp(&self, other: &OperatorPrec) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for OperatorPrec {
+    fn eq(&self, other: &OperatorPrec) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+static OPERATORS: phf::Map<&'static str, OperatorPrec> = phf_map! {
+    "|" =>  OperatorPrec { precedence:3, op:ParsedExpr::LOr },
+    "^" =>  OperatorPrec { precedence:4, op:ParsedExpr::LXor },
+    "&" =>  OperatorPrec { precedence:5, op:ParsedExpr::LAnd },
+    ">>" => OperatorPrec { precedence:6, op:ParsedExpr::Rshift },
+    "<<" => OperatorPrec { precedence:6, op:ParsedExpr::Lshift },
+    "+" =>  OperatorPrec { precedence:7, op:ParsedExpr::Add },
+    "-" =>  OperatorPrec { precedence:7, op:ParsedExpr::Sub },
+    "*" =>  OperatorPrec { precedence:8, op:ParsedExpr::Mul },
+    "/" =>  OperatorPrec { precedence:8, op:ParsedExpr::Div },
+};
 
 // for future-proofing if we decide to change the stream type
 pub fn input_stream<'a>(s: &'a str) -> InStream<'a> {
@@ -28,10 +67,39 @@ pub fn parse_expr(s: &str) -> IResult<InStream, ParsedExpr> {
 
 // It's surprisingly annoying getting nom to eat exactly one input item.
 fn letter(input: InStream) -> IResult<InStream, char> {
-    one_of!(
-        input,
-        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    )
+    one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")(input)
+}
+
+fn bin_digit1(input: InStream) -> IResult<InStream, &str> {
+    take_while(|c| match c {
+        '0' | '1' => true,
+        _ => false,
+    })(input)
+}
+
+fn number(input: InStream) -> IResult<InStream, u32> {
+    let original_input = input;
+    let (input, sign): (InStream, Option<i32>) =
+        opt(alt((map(tag("+"), |_| 1), map(tag("-"), |_| -1))))(input)?;
+    let sign = sign.unwrap_or(1);
+
+    let (input, (digits, radix)) = alt((
+        map(preceded(alt((tag("0x"), tag("$"))), hex_digit1), |s| {
+            (s, 16)
+        }),
+        map(terminated(bin_digit1, alt((tag("b"), tag("B")))), |s| {
+            (s, 2)
+        }),
+        map(digit1, |s| (s, 10)),
+    ))(input)?;
+
+    match u32::from_str_radix(digits, radix) {
+        Ok(i) => Ok((input, i)),
+        Err(_) => Err(nom::Err::Error((
+            original_input,
+            nom::error::ErrorKind::Digit,
+        ))),
+    }
 }
 
 fn consume_spaces(input: InStream) -> IResult<InStream, ()> {
@@ -40,9 +108,9 @@ fn consume_spaces(input: InStream) -> IResult<InStream, ()> {
 }
 
 fn string(input: InStream) -> IResult<InStream, &str> {
-    let (input, _) = char!(input, '"')?;
+    let (input, _) = char('"')(input)?;
     let (input, result) = take_until("\"")(input)?;
-    let (input, _) = char!(input, '"')?;
+    let (input, _) = char('"')(input)?;
 
     Ok((input, result))
 }
@@ -55,23 +123,44 @@ fn word(input: InStream) -> IResult<InStream, &str> {
     })(input)
 }
 
+fn param(input: InStream) -> IResult<InStream, ParamNode> {
+    alt((
+        map(expr, ParamNode::Expr),
+        map(string, |s| ParamNode::Str(String::from(s))),
+        map(
+            delimited(
+                char('('),
+                separated_list(preceded(consume_spaces, char(',')), expr),
+                preceded(consume_spaces, char(')')),
+            ),
+            ParamNode::List,
+        ),
+    ))(input)
+}
+
 fn ea_macro(input: InStream) -> IResult<InStream, GenericMacro> {
     let (input, _) = consume_spaces(input)?;
     let (input, name) = identifier(input)?;
-    let (input, _) = char!(input, '(')?;
+    let (input, _) = char('(')(input)?;
 
-    panic!("todo")
+    let (input, args) =
+        separated_list(preceded(consume_spaces, tag(",")), param)(input)?;
+
+    let (input, _) = consume_spaces(input)?;
+    let (input, _) = char(')')(input)?;
+
+    Ok((input, GenericMacro { name, args }))
 }
 
 fn preprocessor_param(input: InStream) -> IResult<InStream, String> {
     let (input, _) = consume_spaces(input)?;
-    map!(input, alt!(string | word), String::from)
+    map(alt((string, word)), String::from)(input)
 }
 
 fn preprocessor_command(input: InStream) -> IResult<InStream, GenericDirective> {
-    let (input, _) = char!(input, '#')?;
-    let (input, cmd) = map!(input, alpha1, String::from)?;
-    let (input, args) = many0!(input, preprocessor_param)?;
+    let (input, _) = char('#')(input)?;
+    let (input, cmd) = map(alpha1, String::from)(input)?;
+    let (input, args) = many0(preprocessor_param)(input)?;
 
     Ok((input, GenericDirective { cmd, args }))
 }
@@ -93,134 +182,92 @@ fn label(input: InStream) -> IResult<InStream, Identifier> {
     let (input, _) = consume_spaces(input)?;
     let (input, name) = identifier(input)?;
     let (input, _) = consume_spaces(input)?;
-    let (input, _) = char!(input, ':')?;
+    let (input, _) = char(':')(input)?;
     let (input, _) = consume_spaces(input)?;
-    let (input, _) = line_ending(input)?;
     Ok((input, name))
 }
 
-// XXX - I *really* need to clean these up. The expression parsing is a
-// hacky disaster that is cobbled together by tears.
+fn statement(input: InStream) -> IResult<InStream, ParsedInstr> {
+    let (input, _) = consume_spaces(input)?;
+
+    let (input, args) = many0(preceded(consume_spaces, param))(input)?;
+
+    panic!("todo")
+}
+
 fn expr(input: InStream) -> IResult<InStream, ParsedExpr> {
-    prec5(input)
-}
-
-fn parse_binop(
-    input: InStream,
-    op_chr: char,
-    op_node: impl Fn(Box<ParsedExpr>, Box<ParsedExpr>) -> ParsedExpr,
-    left: impl Fn(InStream) -> IResult<InStream, ParsedExpr>,
-    right: impl Fn(InStream) -> IResult<InStream, ParsedExpr>,
-) -> IResult<InStream, ParsedExpr> {
-    let (input, l) = map!(input, left, Box::new)?;
-    let (input, _) = consume_spaces(input)?;
-    let (input, _) = char!(input, op_chr)?;
-    let (input, _) = consume_spaces(input)?;
-    let (input, r) = map!(input, right, Box::new)?;
-
-    Ok((input, op_node(l, r)))
-}
-
-fn parse_left_recursive_binop(
-    input: InStream,
-    op_chr: impl Fn(
-        InStream,
-    )
-        -> IResult<InStream, fn(Box<ParsedExpr>, Box<ParsedExpr>) -> ParsedExpr>,
-    base: impl Fn(InStream) -> IResult<InStream, ParsedExpr>,
-    right: impl Fn(InStream) -> IResult<InStream, ParsedExpr>,
-) -> IResult<InStream, ParsedExpr> {
-    let (input, b) = base(input)?;
-    match preceded!(input, consume_spaces, op_chr) {
-        Ok((input, op_node)) => {
-            let (input, r) = preceded!(input, consume_spaces, right)?;
-            Ok((input, op_node(Box::new(b), Box::new(r))))
-        }
-        _ => Ok((input, b)),
-    }
+    shunting_yard(input)
 }
 
 fn atom(input: InStream) -> IResult<InStream, ParsedExpr> {
-    alt!(
-        input,
-        map!(identifier, ParsedExpr::Symbol) | map!(ea_macro, ParsedExpr::Macro)
-    )
+    alt((
+        map(ea_macro, ParsedExpr::Macro),
+        map(identifier, ParsedExpr::Symbol),
+        map(number, ParsedExpr::Number),
+        delimited(tag("("), expr, tag(")")),
+    ))(input)
 }
 
-pub fn prec0(input: InStream) -> IResult<InStream, ParsedExpr> {
-    parse_left_recursive_binop(
-        input,
-        |input: InStream| {
-            alt!(input,
-                tag!("*") => { |_| ParsedExpr::Mul as
-                    fn(Box<ParsedExpr>, Box<ParsedExpr>) -> ParsedExpr
-                } |
-                tag!("/") => { |_| ParsedExpr::Div as
-                    fn(Box<ParsedExpr>, Box<ParsedExpr>) -> ParsedExpr
+fn parse_operator(input: InStream) -> IResult<InStream, &OperatorPrec> {
+    for symbol in OPERATORS.keys() {
+        let (input, _) = consume_spaces(input)?;
+        let r: IResult<_, _> = tag(*symbol)(input);
+        if let Ok((input, _)) = r {
+            return Ok((input, OPERATORS.get(*symbol).unwrap()));
+        }
+    }
+    Err(nom::Err::Error((input, nom::error::ErrorKind::Alt)))
+}
+
+// This is actually modified from the traditional shunting yard algorithm.
+// Because we're outputting a syntax tree instead of a postfix stream, we use
+// a stack to hold output tokens, where the top two elements of the stack are
+// the right and left children of the next operator node.
+fn shunting_yard(input: InStream) -> IResult<InStream, ParsedExpr> {
+    let mut operator_stack: PriorityStack<&OperatorPrec> = PriorityStack::new();
+    let mut output_stack: Vec<ParsedExpr> = Vec::new();
+
+    let mut input = input;
+
+    loop {
+        let (input_, _) = consume_spaces(input)?;
+        let (input_, tok) = atom(input_)?;
+        input = input_;
+
+        output_stack.push(tok);
+        if let Ok((input_, opprec)) = parse_operator(input) {
+            input = input_;
+            while let Some(OperatorPrec { precedence, op }) = operator_stack.peek() {
+                if precedence < &opprec.precedence {
+                    break;
                 }
-            )
-        },
-        atom,
-        prec0,
-    )
-}
-
-fn prec1(input: InStream) -> IResult<InStream, ParsedExpr> {
-    parse_left_recursive_binop(
-        input,
-        |input| {
-            alt!(input,
-                tag!("+") => { |_| ParsedExpr::Add as
-                    fn(Box<ParsedExpr>, Box<ParsedExpr>) -> ParsedExpr
-                } |
-                tag!("-") => { |_| ParsedExpr::Sub as
-                    fn(Box<ParsedExpr>, Box<ParsedExpr>) -> ParsedExpr
+                operator_stack.pop();
+                if let (Some(rhs), Some(lhs)) = (output_stack.pop(), output_stack.pop())
+                {
+                    output_stack.push(op(Box::new(lhs), Box::new(rhs)));
+                } else {
+                    return Err(nom::Err::Error((input, nom::error::ErrorKind::Alt)));
                 }
-            )
-        },
-        prec0,
-        prec1,
-    )
-}
+            }
 
-fn prec2(input: InStream) -> IResult<InStream, ParsedExpr> {
-    parse_left_recursive_binop(
-        input,
-        |input| {
-            alt!(input,
-                tag!(">>") => { |_| ParsedExpr::Rshift as
-                    fn(Box<ParsedExpr>, Box<ParsedExpr>) -> ParsedExpr
-                } |
-                tag!("<<") => { |_| ParsedExpr::Lshift as
-                    fn(Box<ParsedExpr>, Box<ParsedExpr>) -> ParsedExpr
-                }
-            )
-        },
-        prec1,
-        prec2,
-    )
-}
-
-fn prec3(input: InStream) -> IResult<InStream, ParsedExpr> {
-    fn internal_binop(input: InStream) -> IResult<InStream, ParsedExpr> {
-        parse_binop(input, '&', ParsedExpr::LAnd, prec2, prec3)
+            operator_stack.push(opprec);
+        } else {
+            break;
+        }
     }
 
-    alt!(input, complete!(internal_binop) | prec2)
-}
-
-fn prec4(input: InStream) -> IResult<InStream, ParsedExpr> {
-    fn internal_binop(input: InStream) -> IResult<InStream, ParsedExpr> {
-        parse_binop(input, '^', ParsedExpr::LXor, prec3, prec4)
+    for OperatorPrec { precedence: _, op } in
+        operator_stack.into_sorted_vec().into_iter().rev()
+    {
+        if let (Some(rhs), Some(lhs)) = (output_stack.pop(), output_stack.pop()) {
+            output_stack.push(op(Box::new(lhs), Box::new(rhs)));
+        } else {
+            return Err(nom::Err::Error((input, nom::error::ErrorKind::Alt)));
+        }
     }
 
-    alt!(input, complete!(internal_binop) | prec3)
-}
-
-fn prec5(input: InStream) -> IResult<InStream, ParsedExpr> {
-    fn internal_binop(input: InStream) -> IResult<InStream, ParsedExpr> {
-        parse_binop(input, '|', ParsedExpr::LOr, prec4, prec5)
+    match output_stack.pop() {
+        Some(result) if output_stack.len() == 0 => Ok((input, result)),
+        _ => Err(nom::Err::Error((input, nom::error::ErrorKind::Alt))),
     }
-
-    alt!(input, complete!(internal_binop) | prec4)
 }
