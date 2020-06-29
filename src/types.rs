@@ -1,3 +1,5 @@
+pub mod generic;
+
 pub enum Void {}
 
 #[derive(Eq, PartialEq, Debug)]

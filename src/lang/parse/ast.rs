@@ -1,5 +1,11 @@
 use crate::types::{Identifier, Void};
 
+pub enum Statement<MacroType> {
+    Directive(GenericDirective),
+    Cmds(Vec<GenericInstr<MacroType>>),
+    Label(Identifier),
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct GenericDirective {
     pub cmd: String,
@@ -7,22 +13,31 @@ pub struct GenericDirective {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct GenericInstr {
-    pub instr: String,
-    pub args: Vec<String>,
+pub enum ParamNode {
+    Expr(ParsedExpr),
+    Str(String),
+    List(Vec<ParsedExpr>),
 }
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum InstrHead<MacroType> {
+    Raw(Identifier),
+    Macro(MacroType),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct GenericInstr<MacroType> {
+    pub front: InstrHead<MacroType>,
+    pub args: Vec<ParamNode>,
+}
+
+pub type ParsedInstr = GenericInstr<GenericMacro>;
+pub type RawInstr = GenericInstr<Void>;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct GenericMacro {
-    pub name: String,
-    pub args: Vec<String>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum EANumber {
-    Byte(u8),
-    Short(u16),
-    Word(u32),
+    pub name: Identifier,
+    pub args: Vec<ParamNode>,
 }
 
 // The MacroType argument represents the type that is used to hold macro
@@ -39,7 +54,7 @@ pub enum ExprNode<MacroType> {
     LOr(Box<ExprNode<MacroType>>, Box<ExprNode<MacroType>>),
     LXor(Box<ExprNode<MacroType>>, Box<ExprNode<MacroType>>),
     Symbol(Identifier),
-    Number(EANumber),
+    Number(u32),
     Macro(MacroType),
 }
 
