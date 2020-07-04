@@ -2,13 +2,9 @@ use phf::phf_map;
 
 use thiserror::Error;
 
-use super::{
-    state::{Definition, State},
-    {FilePosStream, StreamStack, TokenAnnot},
-};
-
-static DIRECTIVES: phf::Map<&'static str, Dispatch> = phf_map! {
+pub(in crate::lang) static DIRECTIVES: phf::Map<&'static str, Dispatch> = phf_map! {
     "define" => Dispatch::Define,
+    "include" => Dispatch::Include,
     "incbin" => Dispatch::Incbin,
     "incext" => Dispatch::Incext,
     "inctevent" => Dispatch::Inctevent,
@@ -20,9 +16,10 @@ static DIRECTIVES: phf::Map<&'static str, Dispatch> = phf_map! {
     "undef" => Dispatch::Undef,
 };
 
-#[derive(Debug)]
-enum Dispatch {
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Dispatch {
     Define,
+    Include,
     Incbin,
     Incext,
     Inctevent,
@@ -56,75 +53,4 @@ pub enum DirectiveError {
     ElseEmptyStack,
     #[error("found unmatched #endif")]
     EndifEmptyStack,
-}
-
-pub(super) fn process(
-    directive: String,
-    stream: &mut StreamStack,
-    state: &mut State,
-) -> Result<Option<FilePosStream<Box<dyn Iterator<Item = char>>>>, DirectiveError> {
-    use Dispatch::*;
-
-    match DIRECTIVES
-        .get(directive.as_str())
-        .map(|d| (d, state.active()))
-    {
-        None => Err(DirectiveError::InvalidDirective { s: directive }),
-        Some((Else, _)) => else_(state).map(|_| None),
-        Some((Endif, _)) => endif(state).map(|_| None),
-        Some((_, false)) => Ok(None),
-        Some((Ifdef, _)) => ifdef(stream, state).map(|_| None),
-        Some((Define, _)) => define(stream, state).map(|_| None),
-        _ => panic!("todo"),
-    }
-}
-
-use DirectiveError::*;
-
-fn define(stream: &mut StreamStack, state: &mut State) -> Result<(), DirectiveError> {
-    let src = match stream.next_non_ws() {
-        None => return Err(DefineNoSrc),
-        Some(c) if c.is_alphabetic() => {
-            c.to_string() + &stream.take_while(char::is_alphanumeric)
-        }
-        _ => return Err(DefineBadIdentifier),
-    };
-
-    match stream.next_char_only() {
-        None | Some('\n') => state.define(src, Definition::Empty),
-        Some(c) if c.is_whitespace() => {
-            state.define(src, Definition::Rename(stream.to_end_of_line()))
-        }
-        Some('(') => panic!("todo"),
-        Some(_) => Err(DefineBadIdentifier),
-    }
-}
-
-fn ifdef(stream: &mut StreamStack, state: &mut State) -> Result<(), DirectiveError> {
-    let src = match stream.next_non_ws() {
-        None => return Err(IfdefNoSrc),
-        Some(c) if c.is_alphabetic() => {
-            c.to_string() + &stream.take_while(char::is_alphanumeric)
-        }
-        _ => return Err(IfdefBadIdentifier),
-    };
-
-    Ok(())
-}
-
-fn else_(state: &mut State) -> Result<(), DirectiveError> {
-    match state.pop() {
-        Some(b) => {
-            state.push(!b);
-            Ok(())
-        }
-        None => Err(ElseEmptyStack),
-    }
-}
-
-fn endif(state: &mut State) -> Result<(), DirectiveError> {
-    match state.pop() {
-        Some(_) => Ok(()),
-        None => Err(EndifEmptyStack),
-    }
 }
