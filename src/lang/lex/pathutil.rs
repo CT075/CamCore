@@ -1,7 +1,8 @@
-use std::path::PathBuf;
-
 // Because Rust doesn't have a nice cross-platform path library, we need to
 // roll our own.
+
+// for ease of refactoring when the way we currently handle paths ends up being
+// woefully inadequate.
 
 pub(super) fn valid_segment_character(c: char) -> bool {
     match c {

@@ -1,7 +1,20 @@
 use std::convert::From;
 use std::path::PathBuf;
 
-use super::preprocess::directive::Dispatch;
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Directive {
+    Define,
+    Include,
+    Incbin,
+    Incext,
+    Inctevent,
+    IfDef,
+    IfNDef,
+    Else,
+    Endif,
+    Pool,
+    Undef,
+}
 
 #[derive(Debug, Clone)]
 pub enum Token<E> {
@@ -31,7 +44,7 @@ pub enum Token<E> {
     RAngle,
     Break,
     Semi,
-    Directive(Dispatch),
+    Directive(Directive),
     Filepath(PathBuf),
     Error(E),
 }

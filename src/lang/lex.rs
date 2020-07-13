@@ -2,16 +2,32 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 
 use genawaiter::rc::{Co, Gen};
+use phf::phf_map;
 use thiserror::Error;
 
-use super::preprocess::directive::{Dispatch, DIRECTIVES};
-use super::token;
-use super::token::FilePosAnnot;
+use super::{
+    token,
+    token::{Directive, FilePosAnnot},
+};
 
 mod pathutil;
 
 #[cfg(test)]
 mod tests;
+
+pub(in crate::lang) static DIRECTIVES: phf::Map<&'static str, Directive> = phf_map! {
+    "define" => Directive::Define,
+    "include" => Directive::Include,
+    "incbin" => Directive::Incbin,
+    "incext" => Directive::Incext,
+    "inctevent" => Directive::Inctevent,
+    "ifdef" => Directive::IfDef,
+    "ifndef" => Directive::IfNDef,
+    "else" => Directive::Else,
+    "endif" => Directive::Endif,
+    "pool" => Directive::Pool,
+    "undef" => Directive::Undef,
+};
 
 #[derive(Error, Debug, Clone)]
 pub enum LexError {
@@ -263,7 +279,7 @@ where
             }
             Some(&d) => {
                 self.yield_single(co, Token::Directive(d), row, col).await;
-                if let Dispatch::Include | Dispatch::Incbin = d {
+                if let Directive::Include | Directive::Incbin = d {
                     self.skip_while(|c| c.is_whitespace() && c != '\n');
                     self.filepath(co).await;
                 }

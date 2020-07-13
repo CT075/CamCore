@@ -1,5 +1,5 @@
 //#![warn(rust_2018_idioms)]
 
-mod lang;
+pub mod lang;
 mod raws;
 pub mod types;

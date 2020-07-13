@@ -1,6 +1,7 @@
 use super::*;
+use token::Directive::*;
+use token::Token::*;
 use LexError::*;
-use Token::*;
 
 fn token_match(ts: (&Token, &Token)) -> bool {
     match ts {
@@ -18,7 +19,6 @@ fn token_match(ts: (&Token, &Token)) -> bool {
         (Caret, Caret) => true,
         (LShift, LShift) => true,
         (RShift, RShift) => true,
-        (Hash, Hash) => true,
         (Comma, Comma) => true,
         (LCurly, LCurly) => true,
         (RCurly, RCurly) => true,
@@ -158,13 +158,13 @@ fn test_filepaths() {
         "filepaths are processed correctly",
         vec![
             Break,
-            Directive(Dispatch::Include),
+            Directive(Include),
             Filepath(p1.clone()),
             Break,
-            Directive(Dispatch::Include),
+            Directive(Include),
             Filepath(p1.clone()),
             Break,
-            Directive(Dispatch::Include),
+            Directive(Include),
             Filepath(p2),
             Break,
             Number(1),
