@@ -7,7 +7,7 @@ use thiserror::Error;
 use super::{
     lex::{LexError, Token as LexToken, TokenAnnot as LexTokenAnnot},
     token,
-    token::{FilePosAnnot, Token::*},
+    token::{Directive, FilePosAnnot, Token::*},
 };
 
 #[cfg(test)]
@@ -15,10 +15,14 @@ mod tests;
 
 #[derive(Error, Debug, Clone)]
 pub enum PreprocError {
-    #[error("file ended unexpectedly ({hint:?})")]
+    #[error("file ended unexpectedly (hint: {hint:?})")]
     UnexpectedEof { hint: String },
     #[error("arguments to macros should be surrounded by parentheses")]
     ExpectLParen,
+    #[error("macro cycle encountered")]
+    MacroCycle { cycle: Vec<String> },
+    #[error("macro {macro_:?} has no body, but is expanded here")]
+    EmptyExpand { macro_: String },
     #[error(transparent)]
     LexError(LexError),
 }
@@ -47,7 +51,7 @@ pub enum Definition {
 pub struct Preprocessor<I: Iterator> {
     stream: I,
     buffer: Vec<VecDeque<TokenAnnot>>,
-    ifstack: Vec<(usize, bool)>,
+    ifstack: Vec<bool>,
     defines: HashMap<String, Definition>,
     expanded: IndexSet<String>,
 }
@@ -111,7 +115,13 @@ where
         };
 
         if self.expanded.get(s).is_some() {
-            return None;
+            let cycle = self.expanded.drain(..).collect();
+            return Some(VecDeque::from(vec![FilePosAnnot {
+                value: Error(PreprocError::MacroCycle { cycle }),
+                row: 0,
+                col: 0,
+                fname: format!("expansion of macro {} at {}", s, t.fname),
+            }]));
         }
 
         // We can't use [lookup_definition] here, because that borrows the entirety
@@ -120,8 +130,12 @@ where
 
         match defn {
             None => None,
-            // TODO: insert warning for expanded empty definition
-            Some(Empty) => Some(VecDeque::new()),
+            Some(Empty) => Some(VecDeque::from(vec![FilePosAnnot {
+                value: Error(PreprocError::EmptyExpand { macro_: s.clone() }),
+                row: t.row,
+                col: t.col,
+                fname: t.fname.clone(),
+            }])),
             Some(Rename(vs)) => Some(
                 vs.clone()
                     .into_iter()
@@ -183,7 +197,7 @@ where
                                 }),
                                 row: 0,
                                 col: 0,
-                                fname: "end of file".to_string(),
+                                fname: format!("end of file {}", t.fname),
                             }]))
                         }
                     }
@@ -223,6 +237,35 @@ where
             }
         }
     }
+
+    fn else_(&mut self) {}
+
+    fn endif(&mut self) {}
+
+    fn define(&mut self) {
+        let s = match self.next().map(TokenAnnot::extract_value) {
+            Some(Token::Ident(s)) => s,
+            Some(_) => panic!("todo"),
+            None => panic!("todo"),
+        };
+    }
+
+    fn process_directive(&mut self, d: &Directive) {
+        use Directive::*;
+        match d {
+            Define => self.define(),
+            Include => panic!("todo"),
+            Incbin => panic!("todo"),
+            Incext => panic!("todo"),
+            Inctevent => panic!("todo"),
+            IfDef => panic!("todo"),
+            IfNDef => panic!("todo"),
+            Pool => panic!("todo"),
+            Undef => panic!("todo"),
+            Else => panic!("todo"),
+            Endif => panic!("todo"),
+        }
+    }
 }
 
 impl<I> Iterator for Preprocessor<I>
@@ -234,12 +277,26 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         let v = match self.pop_buffer() {
             Some(v) => v,
-            None => TokenAnnot::from(self.stream.next()?),
+            None => self.stream.next().map(TokenAnnot::from)?,
         };
 
-        match v.borrow_value() {
-            Directive(d) => panic!("todo"),
-            Ident(s) => match self.attempt_expand(&v) {
+        let if_state = self.ifstack.last().unwrap_or(&false);
+
+        match (if_state, v.borrow_value()) {
+            (false, Directive(Directive::Else)) => {
+                self.else_();
+                self.next()
+            }
+            (false, Directive(Directive::Endif)) => {
+                self.endif();
+                self.next()
+            }
+            (false, _) => self.next(),
+            (true, Directive(d)) => {
+                self.process_directive(d);
+                self.next()
+            }
+            (true, Ident(s)) => match self.attempt_expand(&v) {
                 None => Some(v),
                 Some(results) => {
                     self.buffer.push(results);
@@ -247,7 +304,7 @@ where
                     self.next()
                 }
             },
-            _ => Some(TokenAnnot::from(v)),
+            (true, _) => Some(TokenAnnot::from(v)),
         }
     }
 }

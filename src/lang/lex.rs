@@ -1,3 +1,5 @@
+// XXX - maybe we should rip this out and use a real lexer-generator, like logos?
+
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
@@ -37,8 +39,8 @@ pub enum LexError {
     UnclosedQuote,
     #[error("unclosed block comment")]
     UnclosedComment,
-    // XXX: We have to lose some specificity here, because snailquote::UnescapeError
-    // doesn't implement [Clone]. However, I don't think it matters;
+    // This loses some specificity because snailquote's error doesn't implement
+    // Clone.
     #[error("error in parsing quoted string: {0:?}")]
     Unescape(String),
     #[error("bad number for base {base:?}: {s:?}")]
@@ -142,6 +144,8 @@ where
         self.next().map(|v| v.extract_value())
     }
 
+    // XXX - do we need this?
+    #[allow(dead_code)]
     fn next_non_ws(&mut self) -> Option<char> {
         self.skip_while(|c| c.is_whitespace() && c != '\n');
         self.next_char_only()
