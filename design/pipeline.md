@@ -58,6 +58,6 @@ all definitions from included files (and the `ifdef`s they're underneath), but
 I chose to go with the simpler approach for now.
 
 The second stage of preprocessing processes this structure, potentially kicking
-off new pipelines whenever an include (or `#inctext` etc) is encountered, and
+off new pipelines whenever an include (or `#inctevent` etc) is encountered, and
 otherwise transforming the token blocks.
 
