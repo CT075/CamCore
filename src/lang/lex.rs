@@ -1,10 +1,10 @@
 // XXX - maybe we should rip this out and use a real lexer-generator, like logos?
 
-use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::{collections::VecDeque, iter::IntoIterator};
 
 use genawaiter::rc::{Co, Gen};
 use phf::phf_map;
+use relative_path::RelativePathBuf;
 use thiserror::Error;
 
 use super::{
@@ -31,7 +31,7 @@ pub(in crate::lang) static DIRECTIVES: phf::Map<&'static str, Directive> = phf_m
     "undef" => Directive::Undef,
 };
 
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum LexError {
     #[error("found bad character {chr:?}")]
     BadChar { chr: char },
@@ -51,12 +51,13 @@ pub enum LexError {
     BadDirective { s: String },
     #[error("bad character in filepath: {c:?}")]
     BadPathChar { c: char },
+    #[error("unmatched block comment ending")]
+    UnmatchedBlockClose,
 }
 
 // XXX: need a better name for this
 struct FilePosStream<I: Iterator> {
     wrapped: I,
-    fname: String,
     row: usize,
     col: usize,
     // XXX: this is probably overkill
@@ -68,12 +69,16 @@ struct FilePosStream<I: Iterator> {
 pub type Token = token::Token<LexError>;
 pub type TokenAnnot = FilePosAnnot<Token>;
 
+pub trait Lexer: Iterator<Item = TokenAnnot> {
+    fn filename(&self) -> &String;
+}
+
 impl<I> FilePosStream<I>
 where
     I: Iterator,
 {
     fn annot(&self, value: I::Item) -> FilePosAnnot<I::Item> {
-        FilePosAnnot::annot(value, self.fname.clone(), self.row, self.col)
+        FilePosAnnot::annot(value, self.row, self.col)
     }
 
     fn buffer(&mut self, value: I::Item) {
@@ -94,10 +99,9 @@ impl<I> FilePosStream<I>
 where
     I: Iterator<Item = char>,
 {
-    fn new(fname: String, stream: I) -> FilePosStream<I> {
+    fn new(stream: I) -> FilePosStream<I> {
         FilePosStream {
             wrapped: stream,
-            fname,
             row: 1,
             col: 1,
             buffer: VecDeque::new(),
@@ -177,8 +181,7 @@ where
         row: usize,
         col: usize,
     ) -> () {
-        co.yield_(TokenAnnot::annot(value, self.fname.clone(), row, col))
-            .await;
+        co.yield_(TokenAnnot::annot(value, row, col)).await;
     }
 
     async fn dispatch(
@@ -199,13 +202,36 @@ where
             ']' => self.yield_single(co, RBrack, row, col).await,
             '(' => self.yield_single(co, LParen, row, col).await,
             ')' => self.yield_single(co, RParen, row, col).await,
-            '*' => self.yield_single(co, Star, row, col).await,
+            '*' => match self.next_char_only() {
+                Some('/') => {
+                    self.yield_single(
+                        co,
+                        Error(LexError::UnmatchedBlockClose),
+                        row,
+                        col,
+                    )
+                    .await
+                }
+                Some(c) => {
+                    self.buffer(c);
+                    self.yield_single(co, Star, row, col).await
+                }
+                None => self.yield_single(co, Star, row, col).await,
+            },
             '%' => self.yield_single(co, Percent, row, col).await,
             ',' => self.yield_single(co, Comma, row, col).await,
             // comments are handled below
             '/' => self.yield_single(co, Slash, row, col).await,
             '+' => self.yield_single(co, Plus, row, col).await,
-            '-' => self.yield_single(co, Dash, row, col).await,
+            '-' => {
+                if let Some('-') = self.next_char_only() {
+                    self.yield_single(co, Emdash, row, col).await;
+                } else {
+                    self.buffer(c);
+                    self.yield_single(co, Dash, row, col).await;
+                }
+            }
+            '.' => self.yield_single(co, Dot, row, col).await,
             '&' => self.yield_single(co, Ampersand, row, col).await,
             '^' => self.yield_single(co, Caret, row, col).await,
             '|' => self.yield_single(co, Bar, row, col).await,
@@ -213,22 +239,23 @@ where
                 let result = self.quoted_string();
                 self.yield_single(co, result, row, col).await
             }
-            '<' => {
-                if let Some('<') = self.next_char_only() {
-                    self.yield_single(co, LShift, row, col).await;
-                } else {
+            '<' => match self.next_char_only() {
+                Some('<') => self.yield_single(co, LShift, row, col).await,
+                Some(c) => {
                     self.buffer(c);
-                    self.yield_single(co, LAngle, row, col).await;
+                    self.yield_single(co, LAngle, row, col).await
                 }
-            }
-            '>' => {
-                if let Some('>') = self.next_char_only() {
-                    self.yield_single(co, RShift, row, col).await;
-                } else {
+                None => self.yield_single(co, LAngle, row, col).await,
+            },
+            '>' => match self.next_char_only() {
+                Some('>') => self.yield_single(co, RShift, row, col).await,
+
+                Some(c) => {
                     self.buffer(c);
-                    self.yield_single(co, RAngle, row, col).await;
+                    self.yield_single(co, RAngle, row, col).await
                 }
-            }
+                None => self.yield_single(co, RAngle, row, col).await,
+            },
             '\n' => self.yield_single(co, Break, row, col).await,
             '#' => self.lex_directive(co, row, col).await,
             '$' => {
@@ -295,7 +322,7 @@ where
         let row = self.row;
         let col = self.col;
 
-        let mut result = PathBuf::new();
+        let mut result = RelativePathBuf::new();
         let mut buf = String::new();
 
         let quoted = match self.next_char_only() {
@@ -424,17 +451,23 @@ where
             }
 
             while self.comment_nesting > 0 {
-                match self.advance()?.copy_value() {
-                    '*' => match self.advance()?.copy_value() {
-                        '/' => self.comment_nesting -= 1,
+                if self.in_line_comment {
+                    if let '\n' = self.advance()?.copy_value() {
+                        self.in_line_comment = false;
+                    }
+                } else {
+                    match self.advance()?.copy_value() {
+                        '*' => match self.advance()?.copy_value() {
+                            '/' => self.comment_nesting -= 1,
+                            _ => (),
+                        },
+                        '/' => match self.advance()?.copy_value() {
+                            '/' => self.in_line_comment = true,
+                            '*' => self.comment_nesting += 1,
+                            _ => (),
+                        },
                         _ => (),
-                    },
-                    '/' => match self.advance()?.copy_value() {
-                        '/' => self.in_line_comment = true,
-                        '*' => self.comment_nesting += 1,
-                        _ => (),
-                    },
-                    _ => (),
+                    }
                 }
             }
 
@@ -456,20 +489,36 @@ where
     }
 }
 
-pub fn lex(
-    fname: String,
-    stream: impl Iterator<Item = char>,
-) -> Gen<TokenAnnot, (), impl std::future::Future<Output = ()>> {
-    let mut stream = FilePosStream::new(fname, stream);
+struct DefaultLexer<I> {
+    iterator: I,
+    filename: String,
+}
 
-    Gen::new(|co| async move {
-        while let Some(FilePosAnnot {
-            value,
-            fname: _,
-            row,
-            col,
-        }) = stream.next()
-        {
+impl<I> Iterator for DefaultLexer<I>
+where
+    I: Iterator<Item = TokenAnnot>,
+{
+    type Item = TokenAnnot;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iterator.next()
+    }
+}
+
+impl<I> Lexer for DefaultLexer<I>
+where
+    I: Iterator<Item = TokenAnnot>,
+{
+    fn filename(&self) -> &String {
+        &self.filename
+    }
+}
+
+pub fn lex(fname: String, stream: impl Iterator<Item = char>) -> impl Lexer + Iterator {
+    let mut stream = FilePosStream::new(stream);
+
+    let iterator = Gen::new(|co| async move {
+        while let Some(FilePosAnnot { value, row, col }) = stream.next() {
             if value.is_whitespace() && value != '\n' {
                 continue;
             }
@@ -477,4 +526,10 @@ pub fn lex(
             stream.dispatch(&co, value, row, col).await;
         }
     })
+    .into_iter();
+
+    DefaultLexer {
+        iterator,
+        filename: fname,
+    }
 }

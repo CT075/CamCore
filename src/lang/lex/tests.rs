@@ -3,59 +3,7 @@ use token::Directive::*;
 use token::Token::*;
 use LexError::*;
 
-fn token_match(ts: (&Token, &Token)) -> bool {
-    match ts {
-        (Ident(s1), Ident(s2)) => s1 == s2,
-        (Number(i1), Number(i2)) => i1 == i2,
-        (QuotedString(s1), QuotedString(s2)) => s1 == s2,
-        (Colon, Colon) => true,
-        (Dash, Dash) => true,
-        (Slash, Slash) => true,
-        (Star, Star) => true,
-        (Plus, Plus) => true,
-        (Percent, Percent) => true,
-        (Ampersand, Ampersand) => true,
-        (Bar, Bar) => true,
-        (Caret, Caret) => true,
-        (LShift, LShift) => true,
-        (RShift, RShift) => true,
-        (Comma, Comma) => true,
-        (LCurly, LCurly) => true,
-        (RCurly, RCurly) => true,
-        (LParen, LParen) => true,
-        (RParen, RParen) => true,
-        (LBrack, LBrack) => true,
-        (RBrack, RBrack) => true,
-        (LAngle, LAngle) => true,
-        (RAngle, RAngle) => true,
-        (Break, Break) => true,
-        (Semi, Semi) => true,
-        (Directive(d1), Directive(d2)) => d1 == d2,
-        (Filepath(p1), Filepath(p2)) => p1.as_path() == p2.as_path(),
-        (Error(BadChar { chr: c1 }), Error(BadChar { chr: c2 })) => c1 == c2,
-        (Error(UnclosedQuote), Error(UnclosedQuote)) => true,
-        (Error(UnclosedComment), Error(UnclosedComment)) => true,
-        (Error(Unescape(_)), Error(Unescape(_))) => true,
-        (
-            Error(InvalidBaseNum { s: s1, base: i1 }),
-            Error(InvalidBaseNum { s: s2, base: i2 }),
-        ) => s1 == s2 && i1 == i2,
-        (Error(Overflow { n: n1 }), Error(Overflow { n: n2 })) => n1 == n2,
-        (Error(BadDirective { s: s1 }), Error(BadDirective { s: s2 })) => s1 == s2,
-        (Error(BadPathChar { c: c1 }), Error(BadPathChar { c: c2 })) => c1 == c2,
-        _ => false,
-    }
-}
-
-impl PartialEq for Token {
-    fn eq(&self, other: &Self) -> bool {
-        token_match((self, other))
-    }
-}
-
-impl Eq for Token {}
-
-fn lexer_test(src: &str, fname: &str, v: Vec<Token>) {
+fn tokens_only(src: &str, fname: &str, v: Vec<Token>) {
     let stream = src.chars();
     let result: Vec<Token> = lex(fname.to_string(), stream)
         .into_iter()
@@ -73,7 +21,7 @@ fn test_basic() {
         ENDA
     ";
 
-    lexer_test(
+    tokens_only(
         src,
         "basic test",
         vec![
@@ -100,7 +48,7 @@ fn test_block_comment_no_break() {
       some stuff in here
     */ 0";
 
-    lexer_test(
+    tokens_only(
         src,
         "block comment consumes line break",
         vec![Ident("UNIT".to_string()), Number(0)],
@@ -108,10 +56,63 @@ fn test_block_comment_no_break() {
 }
 
 #[test]
+fn test_nested_comments() {
+    let src = r"UNIT /* /*
+      some stuff in here
+    */ 0
+    */ 0";
+
+    tokens_only(
+        src,
+        "block comment consumes line break",
+        vec![Ident("UNIT".to_string()), Number(0)],
+    );
+
+    let src2 = r"UNIT /*
+      some stuff in here
+    // */ 0
+    */ 1";
+
+    tokens_only(
+        src2,
+        "nested comments work properly",
+        vec![Ident("UNIT".to_string()), Number(1)],
+    );
+}
+
+#[test]
+fn test_buffered_chars() {
+    let src = r"1>2 1*2 1>>2 1*>>2 1*/2";
+
+    tokens_only(
+        src,
+        "multi-character operators are buffered properly",
+        vec![
+            Number(1),
+            RAngle,
+            Number(2),
+            Number(1),
+            Star,
+            Number(2),
+            Number(1),
+            RShift,
+            Number(2),
+            Number(1),
+            Star,
+            RShift,
+            Number(2),
+            Number(1),
+            Error(UnmatchedBlockClose),
+            Number(2),
+        ],
+    );
+}
+
+#[test]
 fn test_numbers() {
     let src = r"0x10 $10 0b10";
 
-    lexer_test(
+    tokens_only(
         src,
         "special number formatting",
         vec![Number(16), Number(16), Number(2)],
@@ -123,7 +124,7 @@ fn test_backslash_escaped_newline() {
     let src = r"UNIT \
     0x1";
 
-    lexer_test(
+    tokens_only(
         src,
         "backslashes escape newlines",
         vec![Ident("UNIT".to_string()), Number(1)],
@@ -132,7 +133,7 @@ fn test_backslash_escaped_newline() {
 
 #[test]
 fn test_filepaths() {
-    use std::path::PathBuf;
+    use relative_path::RelativePathBuf;
 
     let src = r#"
         #include path/1/2/3
@@ -141,19 +142,19 @@ fn test_filepaths() {
         1 / 2
     "#;
 
-    let mut p1 = PathBuf::new();
+    let mut p1 = RelativePathBuf::new();
     p1.push("path");
     p1.push("1");
     p1.push("2");
     p1.push("3");
 
-    let mut p2 = PathBuf::new();
+    let mut p2 = RelativePathBuf::new();
     p2.push("path");
     p2.push("1 2");
     p2.push("3");
     p2.push("4");
 
-    lexer_test(
+    tokens_only(
         src,
         "filepaths are processed correctly",
         vec![

@@ -1,5 +1,4 @@
-use std::convert::From;
-use std::path::PathBuf;
+use relative_path::RelativePathBuf;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Directive {
@@ -16,18 +15,20 @@ pub enum Directive {
     Undef,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token<E> {
     Ident(String),
     Number(u32),
     QuotedString(String),
     Colon,
     Dash,
+    Emdash,
     Slash,
     Star,
     Plus,
     Percent,
     Ampersand,
+    Dot,
     Bar,
     Caret,
     LShift,
@@ -45,7 +46,7 @@ pub enum Token<E> {
     Break,
     Semi,
     Directive(Directive),
-    Filepath(PathBuf),
+    Filepath(RelativePathBuf),
     Error(E),
 }
 
@@ -62,12 +63,14 @@ impl<E> Token<E> {
             QuotedString(s) => QuotedString(s),
             Colon => Colon,
             Dash => Dash,
+            Emdash => Emdash,
             Slash => Slash,
             Star => Star,
             Plus => Plus,
             Percent => Percent,
             Ampersand => Ampersand,
             Bar => Bar,
+            Dot => Dot,
             Caret => Caret,
             LShift => LShift,
             RShift => RShift,
@@ -89,26 +92,16 @@ impl<E> Token<E> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilePosAnnot<T> {
     pub value: T,
-    pub fname: String,
     pub row: usize,
     pub col: usize,
 }
 
 impl<T> FilePosAnnot<T> {
-    pub fn annot(value: T, fname: String, row: usize, col: usize) -> Self {
-        FilePosAnnot {
-            value,
-            fname,
-            row,
-            col,
-        }
-    }
-
-    pub fn filename(&self) -> &str {
-        &self.fname
+    pub fn annot(value: T, row: usize, col: usize) -> Self {
+        FilePosAnnot { value, row, col }
     }
 
     pub fn borrow_value(&self) -> &T {
@@ -116,7 +109,6 @@ impl<T> FilePosAnnot<T> {
             value,
             row: _,
             col: _,
-            fname: _,
         } = self;
         value
     }
@@ -126,7 +118,6 @@ impl<T> FilePosAnnot<T> {
             value,
             row: _,
             col: _,
-            fname: _,
         } = self;
         value
     }
@@ -135,17 +126,11 @@ impl<T> FilePosAnnot<T> {
     where
         F: Fn(T) -> T2,
     {
-        let FilePosAnnot {
-            value,
-            row,
-            col,
-            fname,
-        } = self;
+        let FilePosAnnot { value, row, col } = self;
         FilePosAnnot {
             value: f(value),
             row,
             col,
-            fname,
         }
     }
 }
