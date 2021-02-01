@@ -133,6 +133,14 @@ impl<T> FilePosAnnot<T> {
             col,
         }
     }
+
+    pub fn substitute<T2>(self, value: T2) -> FilePosAnnot<T2> {
+        FilePosAnnot {
+            value,
+            row: self.row,
+            col: self.col,
+        }
+    }
 }
 
 impl<T> FilePosAnnot<T>

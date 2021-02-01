@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use relative_path::RelativePathBuf;
 
 use super::*;
 
@@ -6,18 +6,14 @@ use super::*;
 enum Stmt {
     Tokens(Vec<Token>),
     IfDef(String, Vec<Stmt>, Vec<Stmt>),
-    Include(PathBuf),
-    Incbin(PathBuf),
+    Include(RelativePathBuf),
+    Incbin(RelativePathBuf),
     Pool,
     Define(String, Definition),
     Undef(String),
-    Malformed {
-        why: PreprocError,
-        row: usize,
-        col: usize,
-    },
-    Incext,
-    Inctevent,
+    Malformed,
+    Incext(RelativePathBuf, Vec<Token>),
+    Inctevent(RelativePathBuf, Vec<Token>),
 }
 
 fn strip_positions(t: Ast) -> Vec<Stmt> {
@@ -34,9 +30,9 @@ fn strip_positions(t: Ast) -> Vec<Stmt> {
             Statement::Pool => Stmt::Pool,
             Statement::Define(s, d) => Stmt::Define(s, d),
             Statement::Undef(s) => Stmt::Undef(s),
-            Statement::Malformed { why, row, col } => Stmt::Malformed { why, row, col },
-            Statement::Incext => Stmt::Incext,
-            Statement::Inctevent => Stmt::Inctevent,
+            Statement::Malformed => Stmt::Malformed,
+            Statement::Incext(p, ts) => Stmt::Incext(p, ts),
+            Statement::Inctevent(p, ts) => Stmt::Inctevent(p, ts),
         })
         .collect()
 }
@@ -44,12 +40,11 @@ fn strip_positions(t: Ast) -> Vec<Stmt> {
 fn tokens_only(src: &str, fname: &str, t: Vec<Stmt>) {
     let stream = src.chars();
     let mut lexer = lex(fname.to_string(), stream);
-    let result = strip_positions(ast(&mut lexer));
+    let result = strip_positions(ast(&mut lexer).extract().0);
 
     assert_eq!(result, t);
 }
 
-use token::Token::*;
 use Stmt::*;
 
 #[test]
@@ -72,7 +67,7 @@ fn test_basic() {
     #endif
     "#;
 
-    let mut p = PathBuf::new();
+    let mut p = RelativePathBuf::new();
     p.push("a");
     p.push("b");
     p.push("c");

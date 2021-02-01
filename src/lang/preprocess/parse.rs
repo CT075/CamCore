@@ -1,157 +1,148 @@
-// statement. This can lead to some unfortunate error dropping, such as if
-// there are multiple lexing errors on the same line, or a lexing error in
-// place of an identifier.
-//
-// To a large extent, this is due to a misunderstanding of a paper L read about
-// error recovery in parsers, in which they suggested collecting errors along
-// with an error node in your syntax tree -- L had interpreted this to mean that
-// the error node *itself* would contain the error context. This can lead to
-// some inevitable short-circuiting in the way this parser is constructed, as
-// L don't currently have an ergonomic way to produce multiple `Statement`s at
-// once, which is an issue if, in the process of parsing what appears to be a
-// single `Statement`, multiple errors are encountered. The simplest band-aid
-// fix is to change several of the functions in this file to return a
-// `Vec<Statement>` instead of just a `Statement` (for the functional nerds
-// reading this, we're lifting the parser into the list monad), but L think it
-// would ultimately be better to change them to return `(Statement, Vec<Error>)`
-// (lift into the writer monad instead).
-//
-// L think the biggest impact of this error will be in cases where a malformed
-// directive parameter (say, a missing name in a `#define`) is followed by
-// extra junk, which will produce some weird error output. Most other edge
-// cases are related to short-circuiting on lexing errors, and L don't expect
-// those to be particularly common.
-
 use std::collections::VecDeque;
 
 use indexmap::set::IndexSet;
 use relative_path::RelativePathBuf;
 
 use super::{
-    super::lex::{lex, LexError, Lexer, Token, TokenAnnot},
-    syntax::{Ast, Definition, Statement},
+    super::lex::{lex, Lexer, TokenAnnot as LexTokenAnnot},
+    syntax::{convert_token, Ast, Definition, Statement, Token, TokenAnnot},
     token,
     token::{Directive, FilePosAnnot},
     PreprocError,
 };
+use crate::writer::{Logger, LoggerContext};
 
 use token::Token::*;
 
 #[cfg(test)]
 mod tests;
 
-macro_rules! expect {
-    ( $stream:expr, $p:pat, $row:pat, $col:pat, $b:block, $err:expr, $s:expr ) => {{
-        match $stream.next() {
-            Some(FilePosAnnot {
-                value: $p,
-                row,
-                col,
-            }) => {
-                // These are required to make the linter shut up about
-                // `unused variables`.
-                let $row = row;
-                let $col = col;
-                $b
-            }
-            Some(FilePosAnnot { value: _, row, col }) => {
-                return Statement::Malformed {
-                    why: $err,
-                    row,
-                    col,
-                }
-            }
-            None => {
-                return Statement::Malformed {
-                    why: PreprocError::UnexpectedEof {
-                        hint: format!("I was looking for {}", $s),
-                    },
-                    row: 0,
-                    col: 0,
-                }
-            }
-        }
-    }};
+pub type Error = FilePosAnnot<PreprocError>;
+pub type Output<T> = Logger<T, Error>;
+type ErrorLog = LoggerContext<Error>;
+
+fn log_error(log: &mut ErrorLog, err: PreprocError, row: usize, col: usize) -> () {
+    log.log(FilePosAnnot {
+        value: err,
+        row,
+        col,
+    });
 }
 
 // collects items from the stream until `f` is true, and discards that item.
-fn take_until<L, F>(stream: &mut L, f: F) -> Vec<TokenAnnot>
+fn take_until<L, F>(f: F, stream: &mut L, errs: &mut ErrorLog) -> Vec<TokenAnnot>
 where
     L: Lexer,
     F: Fn(&Token) -> bool,
 {
     let mut result = Vec::new();
-    while let Some(t) = stream.next() {
-        if f(t.borrow_value()) {
-            break;
-        }
 
-        result.push(t);
+    while let Some(t) = stream.next() {
+        match t {
+            FilePosAnnot {
+                value: Error(e),
+                row,
+                col,
+            } => log_error(errs, PreprocError::LexError(e), row, col),
+            FilePosAnnot { value, row, col } => {
+                let value = convert_token(value);
+                if f(&value) {
+                    break;
+                }
+                result.push(FilePosAnnot { value, row, col });
+            }
+        }
     }
 
     result
 }
 
-macro_rules! expect_end_of_line {
-    ( $stream:expr, $directive:expr ) => {{
-        let tokens = take_until($stream, |t| matches!(t, Break));
-
-        if let Some(FilePosAnnot { value: _, row, col }) = tokens.first() {
-            return Statement::Malformed {
-                why: PreprocError::ExpectBreak {
-                    directive: $directive,
-                },
-                row: *row,
-                col: *col,
-            };
-        }
-    }};
-}
-
-fn expect_full_line<L>(
-    result: Statement,
+fn expect_end_of_line<L>(
     directive: &'static str,
     stream: &mut L,
-) -> Statement
+    errs: &mut ErrorLog,
+) -> ()
 where
     L: Lexer,
 {
-    expect_end_of_line!(stream, directive);
-    result
-}
+    let ts = take_until(|t| matches!(t, Break), stream, errs);
 
-fn consume_full_line<L>(result: Statement, stream: &mut L) -> Statement
-where
-    L: Lexer,
-{
-    take_until(stream, |t| matches!(t, Break));
-    result
-}
-
-fn malformed_lex(e: FilePosAnnot<LexError>) -> Statement {
-    let FilePosAnnot {
-        value: err,
-        row,
-        col,
-    } = e;
-
-    Statement::Malformed {
-        why: PreprocError::LexError(err),
-        row,
-        col,
+    for t in ts.into_iter() {
+        errs.log(t.map(|_| PreprocError::ExpectBreak { directive }));
+        break;
     }
 }
 
-pub fn ast<L>(stream: &mut L) -> Ast
+macro_rules! expect {
+    ( $p:pat, $body:block, $error:expr, $wanted:expr, $stream:expr, $errs:expr ) => {
+        match $stream.next() {
+            None => {
+                log_error(
+                    $errs,
+                    PreprocError::UnexpectedEof {
+                        hint: format!("I was looking for {}", $wanted),
+                    },
+                    0,
+                    0,
+                );
+                return Statement::Malformed;
+            }
+            Some(FilePosAnnot {
+                value: $p,
+                row,
+                col,
+            }) => FilePosAnnot {
+                value: $body,
+                row,
+                col,
+            },
+            Some(FilePosAnnot { value: _, row, col }) => {
+                log_error($errs, $error, row, col);
+                return Statement::Malformed;
+            }
+        }
+    };
+}
+
+fn expect_full_line<T, L>(
+    result: T,
+    directive: &'static str,
+    stream: &mut L,
+    errs: &mut ErrorLog,
+) -> T
 where
     L: Lexer,
 {
-    let mut result = Vec::new();
+    expect_end_of_line(directive, stream, errs);
+    result
+}
 
-    while let Some(head) = stream.next() {
-        match head.borrow_value() {
+pub fn ast<L>(stream: &mut L) -> Output<Ast>
+where
+    L: Lexer,
+{
+    let mut result = Output::pure(Vec::new());
+
+    while let Some(FilePosAnnot { value, row, col }) = stream.next() {
+        match value {
             Break | Semi => (),
-            _ => result.push(statement(head, stream)),
+            Error(e) => result.log(FilePosAnnot {
+                value: PreprocError::LexError(e),
+                row,
+                col,
+            }),
+            _ => result.and_then_mut(|ast, errs| {
+                let stmt = statement(
+                    FilePosAnnot {
+                        value: convert_token(value),
+                        row,
+                        col,
+                    },
+                    stream,
+                    errs,
+                );
+                ast.push(stmt)
+            }),
         };
     }
 
@@ -160,56 +151,40 @@ where
 
 // Invariant: Should always consume at least one `Break` token if it does not
 // reach the end of the file.
-fn statement<L>(head: TokenAnnot, stream: &mut L) -> Statement
+fn statement<L>(head: TokenAnnot, stream: &mut L, errs: &mut ErrorLog) -> Statement
 where
     L: Lexer,
 {
-    let TokenAnnot { value, row, col } = head;
-
-    match value {
-        Directive(d) => dispatch_directive(d, row, col, stream),
-        _ => match tokens(stream) {
-            Ok(mut t) => {
-                t.insert(0, TokenAnnot { value, row, col });
-                Statement::Tokens(t)
-            }
-            Err(e) => malformed_lex(e),
-        },
+    match head.borrow_value() {
+        Directive(d) => dispatch_directive(*d, head.row, head.col, stream, errs),
+        _ => Statement::Tokens(tokens(head, stream, errs)),
     }
 }
 
-fn tokens<L>(stream: &mut L) -> Result<Vec<TokenAnnot>, FilePosAnnot<LexError>>
+fn tokens<L>(head: TokenAnnot, stream: &mut L, errs: &mut ErrorLog) -> Vec<TokenAnnot>
 where
     L: Lexer,
 {
     let mut buf = Vec::new();
-    // I prefer to avoid structuring the loop like this, but we need it to
-    // ensure that we always consume to the end of the line.
-    let mut err = None;
+    buf.push(head);
 
-    while let Some(t) = stream.next() {
-        let FilePosAnnot { value, row, col } = t;
-
+    while let Some(FilePosAnnot { value, row, col }) = stream.next() {
         match value {
             Break => break,
-            Error(e) => {
-                // This short-circuits on the first lexing error encountered
-                // on a given line, instead of collecting them.
-                err = Some(Err(FilePosAnnot { value: e, row, col }));
-                break;
-            }
-            _ => buf.push(TokenAnnot {
-                value: Token::from(value),
+            Error(e) => errs.log(FilePosAnnot {
+                value: PreprocError::LexError(e),
+                row,
+                col,
+            }),
+            _ => buf.push(FilePosAnnot {
+                value: convert_token(value),
                 row,
                 col,
             }),
         }
     }
 
-    match err {
-        None => Ok(buf),
-        Some(e) => e,
-    }
+    buf
 }
 
 fn dispatch_directive<L>(
@@ -217,6 +192,7 @@ fn dispatch_directive<L>(
     row: usize,
     col: usize,
     stream: &mut L,
+    errs: &mut ErrorLog,
 ) -> Statement
 where
     L: Lexer,
@@ -224,64 +200,61 @@ where
     use token::Directive::*;
 
     match d {
-        Include => expect_full_line(include(stream), "include", stream),
-        Incbin => expect_full_line(incbin(stream), "incbin", stream),
-        IfDef => ifdef(true, stream),
-        IfNDef => ifdef(false, stream),
-        Define => expect_full_line(define(stream), "define", stream),
-        Else => consume_full_line(
-            Statement::Malformed {
-                why: PreprocError::StandaloneElse,
-                row,
-                col,
-            },
-            stream,
-        ),
-        Endif => consume_full_line(
-            Statement::Malformed {
-                why: PreprocError::StandaloneEndif,
-                row,
-                col,
-            },
-            stream,
-        ),
-        Undef => expect_full_line(undef(stream), "undef", stream),
-        Pool => expect_full_line(Statement::Pool, "pool", stream),
-        Incext => incext(row, col, stream),
-        Inctevent => inctevent(row, col, stream),
+        Include => expect_full_line(include(stream, errs), "include", stream, errs),
+        Incbin => expect_full_line(incbin(stream, errs), "incbin", stream, errs),
+        IfDef => ifdef(true, stream, errs),
+        IfNDef => ifdef(false, stream, errs),
+        Define => expect_full_line(define(stream, errs), "define", stream, errs),
+        Else => {
+            log_error(errs, PreprocError::StandaloneElse, row, col);
+            let _ = take_until(|t| matches!(t, Break), stream, errs);
+            Statement::Malformed
+        }
+        Endif => {
+            log_error(errs, PreprocError::StandaloneEndif, row, col);
+            let _ = take_until(|t| matches!(t, Break), stream, errs);
+            Statement::Malformed
+        }
+        Undef => expect_full_line(undef(stream, errs), "undef", stream, errs),
+        Pool => {
+            expect_end_of_line("pool", stream, errs);
+            Statement::Pool
+        }
+        Incext => incext(row, col, stream, errs),
+        Inctevent => inctevent(row, col, stream, errs),
     }
 }
 
-fn include<L>(stream: &mut L) -> Statement
+fn include<L>(stream: &mut L, errs: &mut ErrorLog) -> Statement
 where
     L: Lexer,
 {
     let path = expect!(
-        stream,
         Filepath(p),
-        _,
-        _,
         { p },
         PreprocError::ExpectIncludePath,
-        "a filepath"
-    );
+        "a filepath",
+        stream,
+        errs
+    )
+    .extract_value();
 
     Statement::Include(path)
 }
 
-fn incbin<L>(stream: &mut L) -> Statement
+fn incbin<L>(stream: &mut L, errs: &mut ErrorLog) -> Statement
 where
     L: Lexer,
 {
     let path = expect!(
-        stream,
         Filepath(p),
-        _,
-        _,
         { p },
         PreprocError::ExpectIncbinPath,
-        "a filepath"
-    );
+        "a filepath",
+        stream,
+        errs
+    )
+    .extract_value();
 
     Statement::Incbin(path)
 }
@@ -331,31 +304,22 @@ impl IfDefBuffer {
     }
 }
 
-fn ifdef<L>(is_def: bool, stream: &mut L) -> Statement
+fn ifdef<L>(is_def: bool, stream: &mut L, errs: &mut ErrorLog) -> Statement
 where
     L: Lexer,
 {
     use token::Directive::*;
 
-    let (s, row, col) = expect!(
-        stream,
+    let FilePosAnnot { value: s, row, col } = expect!(
         Ident(s),
-        row,
-        col,
-        { (s, row, col) },
+        { s },
         PreprocError::ExpectIfdefName,
-        "an identifier"
+        "an identifier",
+        stream,
+        errs
     );
 
-    let () = expect!(
-        stream,
-        Break,
-        _,
-        _,
-        { () },
-        PreprocError::ExpectBreak { directive: "ifdef" },
-        "a newline"
-    );
+    expect_end_of_line("ifdef", stream, errs);
 
     let mut buf = IfDefBuffer::new(if is_def {
         DefBranch::Def
@@ -363,42 +327,45 @@ where
         DefBranch::Ndef
     });
 
-    while let Some(t) = stream.next() {
-        match t.borrow_value() {
+    while let Some(FilePosAnnot { value, row, col }) = stream.next() {
+        match value {
             Directive(Endif) => {
-                return expect_full_line(buf.to_statement(s), "endif", stream)
+                return expect_full_line(buf.to_statement(s), "endif", stream, errs)
             }
             Directive(Else) => {
-                expect!(
-                    stream,
-                    Break,
-                    _,
-                    _,
-                    { () },
-                    PreprocError::ExpectBreak { directive: "else" },
-                    "a newline"
-                );
+                expect_end_of_line("else", stream, errs);
                 buf.flip();
             }
+            Error(e) => errs.log(FilePosAnnot {
+                value: PreprocError::LexError(e),
+                row,
+                col,
+            }),
             _ => {
-                let stmt = statement(t, stream);
+                let stmt = statement(
+                    FilePosAnnot {
+                        value: convert_token(value),
+                        row,
+                        col,
+                    },
+                    stream,
+                    errs,
+                );
                 buf.push(stmt);
             }
         }
     }
 
-    Statement::Malformed {
-        why: PreprocError::UnclosedIf,
-        row,
-        col,
-    }
+    log_error(errs, PreprocError::UnclosedIf, row, col);
+
+    Statement::Malformed
 }
 
 fn unquote_definition(
     name: &String,
     body: String,
     fname: &String,
-) -> Result<Vec<Token>, FilePosAnnot<LexError>> {
+) -> Option<Output<Vec<Token>>> {
     let loc = format!(
         "definition of {name} (in {fname})",
         name = name,
@@ -406,9 +373,61 @@ fn unquote_definition(
     );
 
     let mut stream = lex(loc, body.chars());
+    let mut errs = ErrorLog::new(Vec::new());
 
-    tokens(&mut stream)
-        .map(|ts| ts.into_iter().map(FilePosAnnot::extract_value).collect())
+    // XXX - this is kind of gross
+    while let Some(FilePosAnnot { value, row, col }) = stream.next() {
+        match value {
+            Error(e) => errs.log(FilePosAnnot {
+                value: PreprocError::LexError(e),
+                row,
+                col,
+            }),
+            _ => {
+                let result = tokens(
+                    FilePosAnnot {
+                        value: convert_token(value),
+                        row,
+                        col,
+                    },
+                    &mut stream,
+                    &mut errs,
+                );
+                return Some(Output::with_context(
+                    result
+                        .into_iter()
+                        .map(FilePosAnnot::extract_value)
+                        .collect(),
+                    errs.map(|errs| {
+                        errs.into_iter()
+                            .map(|err| match err {
+                                FilePosAnnot {
+                                    value: PreprocError::LexError(e),
+                                    row,
+                                    col,
+                                } => FilePosAnnot {
+                                    value: PreprocError::LexErrorInMacroBody {
+                                        err: e,
+                                        name: name.clone(),
+                                        fname: fname.clone(),
+                                    },
+                                    row,
+                                    col,
+                                },
+                                _ => panic!(concat!(
+                                    "BUG (unquote_definition): ",
+                                    "`lang::preprocess::parse::tokens` ",
+                                    "logged error other than `LexError`"
+                                )),
+                            })
+                            .collect()
+                    }),
+                ));
+            }
+        }
+    }
+
+    None
 }
 
 fn parse_args<L>(
@@ -416,7 +435,8 @@ fn parse_args<L>(
     row: usize,
     col: usize,
     stream: &mut L,
-) -> Result<IndexSet<String>, Statement>
+    errs: &mut ErrorLog,
+) -> Option<IndexSet<String>>
 where
     L: Lexer,
 {
@@ -426,85 +446,103 @@ where
         let FilePosAnnot { value, row, col } = t;
 
         match value {
-            RParen => return Ok(args),
+            RParen => return Some(args),
             Ident(s) => {
                 // `IndexSet::insert` returns true if the item is not already
                 // present.
                 if !args.insert(s) {
-                    return Err(Statement::Malformed {
-                        why: PreprocError::DuplicateMacroArg { name },
+                    log_error(
+                        errs,
+                        PreprocError::DuplicateMacroArg { name: name.clone() },
                         row,
                         col,
-                    });
+                    )
                 }
             }
-            _ => {
-                return Err(Statement::Malformed {
-                    why: PreprocError::InvalidMacroArg,
-                    row,
-                    col,
-                })
-            }
+            _ => log_error(errs, PreprocError::InvalidMacroArg, row, col),
         }
     }
 
-    Err(Statement::Malformed {
-        why: PreprocError::UnexpectedEof {
+    errs.log(FilePosAnnot {
+        value: PreprocError::UnexpectedEof {
             hint: "is there an unclosed left paren?".to_string(),
         },
         row,
         col,
-    })
+    });
+
+    None
 }
 
-fn definition_body<L>(name: &String, stream: &mut L) -> Result<Vec<Token>, Statement>
+fn definition_body<L>(
+    name: &String,
+    body: Option<LexTokenAnnot>,
+    stream: &mut L,
+    errs: &mut ErrorLog,
+) -> Vec<Token>
 where
     L: Lexer,
 {
-    match stream.next() {
+    match body {
+        // This case is only reachable via `#define foo(a,b) [BREAK]`.
         Some(FilePosAnnot {
             value: Break,
             row,
             col,
-        }) => Err(Statement::Malformed {
-            why: PreprocError::EmptyMacroBody,
-            row,
-            col,
-        }),
+        }) => {
+            log_error(errs, PreprocError::EmptyMacroBody, row, col);
+            Vec::new()
+        }
         Some(FilePosAnnot {
             value: QuotedString(body),
-            row: _,
-            col: _,
+            row,
+            col,
         }) => match unquote_definition(name, body, stream.filename()) {
-            Ok(ts) => Ok(ts),
-            Err(e) => Err(malformed_lex(e)),
+            Some(w) => {
+                let (ts, macro_errs) = w.extract();
+                errs.log_many(macro_errs);
+                ts
+            }
+            None => {
+                log_error(errs, PreprocError::EmptyMacroBody, row, col);
+                Vec::new()
+            }
         },
         Some(FilePosAnnot { value, row, col }) => match value {
-            Error(e) => Err(malformed_lex(FilePosAnnot { value: e, row, col })),
-            _ => Ok(vec![Token::from(value)]),
+            Error(e) => {
+                log_error(errs, PreprocError::LexError(e), row, col);
+                Vec::new()
+            }
+            _ => vec![convert_token(value)],
         },
-        None => Err(Statement::Malformed {
-            why: PreprocError::UnexpectedEof {
-                hint: "is there an unclosed left paren?".to_string(),
-            },
-            row: 0,
-            col: 0,
-        }),
+        None => {
+            errs.log(FilePosAnnot {
+                value: PreprocError::UnexpectedEof {
+                    hint: "is there an unclosed left paren?".to_string(),
+                },
+                row: 0,
+                col: 0,
+            });
+            Vec::new()
+        }
     }
 }
 
-fn define<L>(stream: &mut L) -> Statement
+fn define<L>(stream: &mut L, errs: &mut ErrorLog) -> Statement
 where
     L: Lexer,
 {
-    let s = expect!(
-        stream,
+    let FilePosAnnot {
+        value: s,
+        row: _,
+        col: _,
+    } = expect!(
         Ident(s),
-        _,
-        _,
         { s },
         PreprocError::ExpectDefineName,
-        "an identifier"
+        "an identifier",
+        stream,
+        errs
     );
 
     match stream.next() {
@@ -518,38 +556,35 @@ where
             value: LParen,
             row,
             col,
-        }) => match parse_args(s.clone(), row, col, stream) {
-            Err(e) => e,
-            Ok(args) => match definition_body(&s, stream) {
-                Ok(ts) => {
-                    Statement::Define(s, Definition::Macro(args, VecDeque::from(ts)))
-                }
-                Err(e) => e,
-            },
-        },
-        Some(t) => match definition_body(&s, stream) {
-            Ok(ts) => {
-                let mut ts = VecDeque::from(ts);
-                ts.push_front(Token::from(t.extract_value()));
-                Statement::Define(s, Definition::Rename(ts))
+        }) => match parse_args(s.clone(), row, col, stream, errs) {
+            None => Statement::Malformed,
+            Some(args) => {
+                let ts = definition_body(&s, stream.next(), stream, errs);
+                Statement::Define(s, Definition::Macro(args, VecDeque::from(ts)))
             }
-            Err(e) => e,
         },
+        t @ Some(_) => {
+            let ts = VecDeque::from(definition_body(&s, t, stream, errs));
+            Statement::Define(s, Definition::Rename(ts))
+        }
     }
 }
 
-fn undef<L>(stream: &mut L) -> Statement
+fn undef<L>(stream: &mut L, errs: &mut ErrorLog) -> Statement
 where
     L: Lexer,
 {
-    let s = expect!(
-        stream,
+    let FilePosAnnot {
+        value: s,
+        row: _,
+        col: _,
+    } = expect!(
         Ident(s),
-        _,
-        _,
         { s },
         PreprocError::ExpectUndefName,
-        "an identifier"
+        "an identifier",
+        stream,
+        errs
     );
 
     Statement::Undef(s)
@@ -559,13 +594,10 @@ fn parse_filepath(s: String) -> RelativePathBuf {
     RelativePathBuf::from(s.replace("\\", "/"))
 }
 
-fn incext<L>(row: usize, col: usize, stream: &mut L) -> Statement
+fn incext<L>(row: usize, col: usize, stream: &mut L, errs: &mut ErrorLog) -> Statement
 where
     L: Lexer,
 {
-    // XXX - currently, there is no way for this to ever accept a `Filepath`.
-    // An invocation like `#incext Foo.exe` would be `Ident("Foo"), Dot,
-    // Ident("exe")`, which we'd need to reconstruct.
     let prog = match stream.next() {
         Some(FilePosAnnot {
             value: QuotedString(s),
@@ -577,52 +609,54 @@ where
             row: _,
             col: _,
         }) => parse_filepath(s),
+        // XXX - currently, this case is impossible to actually reach. An
+        // invocation like `#incext Foo.exe` would be `Ident("Foo"), Dot,
+        // Ident("exe")`, which we'd need to reconstruct, so we'll mandate
+        // using `"Foo.exe"` instead.
         Some(FilePosAnnot {
             value: Filepath(prog),
             row: _,
             col: _,
         }) => prog,
         Some(FilePosAnnot { value: _, row, col }) => {
-            return Statement::Malformed {
-                why: PreprocError::ExtBadProgram {
+            errs.log(FilePosAnnot {
+                value: PreprocError::ExtBadProgram {
                     directive: "incext",
                 },
                 row,
                 col,
-            }
+            });
+            return Statement::Malformed;
         }
         None => {
-            return Statement::Malformed {
-                why: PreprocError::UnexpectedEof {
+            errs.log(FilePosAnnot {
+                value: PreprocError::UnexpectedEof {
                     hint: "#incext should be followed by a program name".to_string(),
                 },
                 row,
                 col,
-            }
+            });
+            return Statement::Malformed;
         }
     };
 
-    let rest = take_until(stream, |t| matches!(t, Break))
+    let rest = take_until(|t| matches!(t, Break), stream, errs)
         .into_iter()
-        .map(
-            |FilePosAnnot {
-                 value,
-                 row: _,
-                 col: _,
-             }| value,
-        )
+        .map(FilePosAnnot::extract_value)
         .collect();
 
     Statement::Incext(prog, rest)
 }
 
-fn inctevent<L>(row: usize, col: usize, stream: &mut L) -> Statement
+fn inctevent<L>(
+    row: usize,
+    col: usize,
+    stream: &mut L,
+    errs: &mut ErrorLog,
+) -> Statement
 where
     L: Lexer,
 {
-    // XXX - currently, there is no way for this to ever accept a `Filepath`.
-    // An invocation like `#incext Foo.exe` would be `Ident("Foo"), Dot,
-    // Ident("exe")`, which we'd need to reconstruct.
     let prog = match stream.next() {
         Some(FilePosAnnot {
             value: QuotedString(s),
@@ -640,26 +674,28 @@ where
             col: _,
         }) => prog,
         Some(FilePosAnnot { value: _, row, col }) => {
-            return Statement::Malformed {
-                why: PreprocError::ExtBadProgram {
+            errs.log(FilePosAnnot {
+                value: PreprocError::ExtBadProgram {
                     directive: "inctevent",
                 },
                 row,
                 col,
-            }
+            });
+            return Statement::Malformed;
         }
         None => {
-            return Statement::Malformed {
-                why: PreprocError::UnexpectedEof {
+            errs.log(FilePosAnnot {
+                value: PreprocError::UnexpectedEof {
                     hint: "#inctevent should be followed by a program name".to_string(),
                 },
                 row,
                 col,
-            }
+            });
+            return Statement::Malformed;
         }
     };
 
-    let rest = take_until(stream, |t| matches!(t, Break))
+    let rest = take_until(|t| matches!(t, Break), stream, errs)
         .into_iter()
         .map(
             |FilePosAnnot {

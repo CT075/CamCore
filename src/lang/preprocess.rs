@@ -5,6 +5,7 @@ use super::{lex::LexError, token};
 pub mod syntax;
 
 mod parse;
+mod stream;
 
 pub use parse::ast;
 
@@ -20,7 +21,7 @@ pub enum PreprocError {
     ExpectIncbinPath,
     #[error("#ifdef and #ifndef should be followed by an identifier")]
     ExpectIfdefName,
-    #[error("too many arguments to directive #{directive:?}")]
+    #[error("expected a line break (too many arguments to #{directive:?})")]
     ExpectBreak { directive: &'static str },
     #[error("unclosed #if block")]
     UnclosedIf,
@@ -44,6 +45,14 @@ pub enum PreprocError {
     MacroCycle { cycle: Vec<String> },
     #[error("macro {macro_:?} has no body, but is expanded here")]
     EmptyExpand { macro_: String },
+    #[error("macro {name:?} is defined twice")]
+    DuplicateMacro { name: String },
+    #[error("{err:?} (in body of macro {name:?}, defined in {fname:?})")]
+    LexErrorInMacroBody {
+        err: LexError,
+        name: String,
+        fname: String,
+    },
     #[error(transparent)]
     LexError(LexError),
 }
