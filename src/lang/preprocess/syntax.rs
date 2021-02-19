@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, convert::Infallible};
+use std::convert::Infallible;
 
 use indexmap::set::IndexSet;
 use relative_path::RelativePathBuf;
@@ -6,6 +6,7 @@ use relative_path::RelativePathBuf;
 use super::{
     super::lex::{Token as LexToken, TokenAnnot as LexTokenAnnot},
     token,
+    token::FilePosAnnot,
 };
 
 pub type Token = token::Token<Infallible>;
@@ -53,11 +54,12 @@ pub fn convert(annot: LexTokenAnnot) -> TokenAnnot {
     annot.map(convert_token)
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Definition {
     Empty,
-    Rename(VecDeque<Token>),
-    Macro(IndexSet<String>, VecDeque<Token>),
+    Rename(Vec<Token>),
+    Macro(IndexSet<String>, Vec<Token>),
+    Builtin,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -69,9 +71,9 @@ pub enum Statement {
     Pool,
     Define(String, Definition),
     Undef(String),
-    Malformed,
     Incext(RelativePathBuf, Vec<Token>),
     Inctevent(RelativePathBuf, Vec<Token>),
+    Malformed,
 }
 
-pub type Ast = Vec<Statement>;
+pub type Ast = Vec<FilePosAnnot<Statement>>;

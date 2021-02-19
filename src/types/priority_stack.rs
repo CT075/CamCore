@@ -5,7 +5,10 @@ pub struct PriorityStack<T> {
     heap: BinaryHeap<(u32, T)>,
 }
 
-impl<T: Ord> PriorityStack<T> {
+impl<T> PriorityStack<T>
+where
+    T: Ord,
+{
     pub fn new() -> Self {
         PriorityStack {
             heap: BinaryHeap::new(),

@@ -1,5 +1,3 @@
-// See [design/monads.md] for a detailed explanation.
-
 pub trait MonoidMut {
     fn add(&mut self, other: Self) -> ();
 
@@ -56,6 +54,7 @@ macro_rules! impl_and_then_vararg {
     };
 }
 
+#[allow(dead_code)]
 impl<T, W: MonoidMut> Writer<T, W> {
     pub fn pure(value: T) -> Self {
         Writer {

@@ -1,6 +1,8 @@
+use std::fmt;
+
 use relative_path::RelativePathBuf;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Directive {
     Define,
     Include,
@@ -15,7 +17,32 @@ pub enum Directive {
     Undef,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl Directive {
+    fn to_string_human(&self) -> &'static str {
+        use Directive::*;
+        match self {
+            Define => "#define",
+            Include => "#include",
+            Incbin => "#incbin",
+            Incext => "#incext",
+            Inctevent => "#inctevent",
+            IfDef => "#ifdef",
+            IfNDef => "#ifndef",
+            Else => "#else",
+            Endif => "#endif",
+            Pool => "#pool",
+            Undef => "#undef",
+        }
+    }
+}
+
+impl fmt::Display for Directive {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.to_string_human())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Token<E> {
     Ident(String),
     Number(u32),
@@ -135,6 +162,14 @@ impl<T> FilePosAnnot<T> {
     }
 
     pub fn substitute<T2>(self, value: T2) -> FilePosAnnot<T2> {
+        FilePosAnnot {
+            value,
+            row: self.row,
+            col: self.col,
+        }
+    }
+
+    pub fn at_location<T2>(&self, value: T2) -> FilePosAnnot<T2> {
         FilePosAnnot {
             value,
             row: self.row,

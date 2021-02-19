@@ -1,12 +1,4 @@
-pub mod generic;
+pub mod priority_stack;
+pub mod writer;
 
-pub enum Void {}
-
-#[derive(Eq, PartialEq, Debug)]
-pub struct Identifier(pub String);
-impl Identifier {
-    pub fn to_string(self) -> String {
-        let Identifier(s) = self;
-        return s;
-    }
-}
+pub use priority_stack::PriorityStack;

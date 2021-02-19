@@ -4,8 +4,8 @@ use super::{lex::LexError, token};
 
 pub mod syntax;
 
+mod includer;
 mod parse;
-mod stream;
 
 pub use parse::ast;
 
@@ -21,8 +21,8 @@ pub enum PreprocError {
     ExpectIncbinPath,
     #[error("#ifdef and #ifndef should be followed by an identifier")]
     ExpectIfdefName,
-    #[error("expected a line break (too many arguments to #{directive:?})")]
-    ExpectBreak { directive: &'static str },
+    #[error("expected a line break (too many arguments to {directive})")]
+    ExpectBreak { directive: token::Directive },
     #[error("unclosed #if block")]
     UnclosedIf,
     #[error("#define should be followed by an identifier")]
@@ -39,20 +39,18 @@ pub enum PreprocError {
     EmptyMacroBody,
     #[error("#undef should be followed by an identifier")]
     ExpectUndefName,
-    #[error("#{directive:?} should be followed by a program name")]
-    ExtBadProgram { directive: &'static str },
+    #[error("{directive} should be followed by a program name")]
+    ExtBadProgram { directive: token::Directive },
     #[error("macro cycle encountered")]
     MacroCycle { cycle: Vec<String> },
-    #[error("macro {macro_:?} has no body, but is expanded here")]
-    EmptyExpand { macro_: String },
-    #[error("macro {name:?} is defined twice")]
-    DuplicateMacro { name: String },
     #[error("{err:?} (in body of macro {name:?}, defined in {fname:?})")]
     LexErrorInMacroBody {
         err: LexError,
         name: String,
         fname: String,
     },
+    #[error("directive {0} is not allowed here")]
+    UnexpectedDirective(token::Directive),
     #[error(transparent)]
     LexError(LexError),
 }

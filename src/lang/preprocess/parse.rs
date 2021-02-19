@@ -1,4 +1,7 @@
-use std::collections::VecDeque;
+// TODO: This file deconstructs annotated tokens a lot solely for the purpose
+// of passing `row` and `col` to an error constructor that needs it. It should
+// be rewritten to use `FilePosAnnot::at_location`, which takes advantage of
+// the fact that `row` and `col` are cloneable.
 
 use indexmap::set::IndexSet;
 use relative_path::RelativePathBuf;
@@ -10,7 +13,7 @@ use super::{
     token::{Directive, FilePosAnnot},
     PreprocError,
 };
-use crate::writer::{Logger, LoggerContext};
+use crate::types::writer::{Logger, LoggerContext};
 
 use token::Token::*;
 
@@ -58,7 +61,7 @@ where
 }
 
 fn expect_end_of_line<L>(
-    directive: &'static str,
+    directive: token::Directive,
     stream: &mut L,
     errs: &mut ErrorLog,
 ) -> ()
@@ -106,7 +109,7 @@ macro_rules! expect {
 
 fn expect_full_line<T, L>(
     result: T,
-    directive: &'static str,
+    directive: token::Directive,
     stream: &mut L,
     errs: &mut ErrorLog,
 ) -> T
@@ -117,6 +120,9 @@ where
     result
 }
 
+// We could possibly actually stream the [Statement] nodes, but that doesn't
+// play suuuuuper nicely with the way error collection is currently handled. We
+// also will want to collect them anyway, so we can cache the results.
 pub fn ast<L>(stream: &mut L) -> Output<Ast>
 where
     L: Lexer,
@@ -151,14 +157,23 @@ where
 
 // Invariant: Should always consume at least one `Break` token if it does not
 // reach the end of the file.
-fn statement<L>(head: TokenAnnot, stream: &mut L, errs: &mut ErrorLog) -> Statement
+fn statement<L>(
+    head: TokenAnnot,
+    stream: &mut L,
+    errs: &mut ErrorLog,
+) -> FilePosAnnot<Statement>
 where
     L: Lexer,
 {
-    match head.borrow_value() {
+    let row = head.row;
+    let col = head.col;
+
+    let value = match head.borrow_value() {
         Directive(d) => dispatch_directive(*d, head.row, head.col, stream, errs),
         _ => Statement::Tokens(tokens(head, stream, errs)),
-    }
+    };
+
+    FilePosAnnot { value, row, col }
 }
 
 fn tokens<L>(head: TokenAnnot, stream: &mut L, errs: &mut ErrorLog) -> Vec<TokenAnnot>
@@ -173,6 +188,11 @@ where
             Break => break,
             Error(e) => errs.log(FilePosAnnot {
                 value: PreprocError::LexError(e),
+                row,
+                col,
+            }),
+            Directive(d) => errs.log(FilePosAnnot {
+                value: PreprocError::UnexpectedDirective(d),
                 row,
                 col,
             }),
@@ -200,11 +220,11 @@ where
     use token::Directive::*;
 
     match d {
-        Include => expect_full_line(include(stream, errs), "include", stream, errs),
-        Incbin => expect_full_line(incbin(stream, errs), "incbin", stream, errs),
+        Include => expect_full_line(include(stream, errs), d, stream, errs),
+        Incbin => expect_full_line(incbin(stream, errs), d, stream, errs),
         IfDef => ifdef(true, stream, errs),
         IfNDef => ifdef(false, stream, errs),
-        Define => expect_full_line(define(stream, errs), "define", stream, errs),
+        Define => expect_full_line(define(stream, errs), d, stream, errs),
         Else => {
             log_error(errs, PreprocError::StandaloneElse, row, col);
             let _ = take_until(|t| matches!(t, Break), stream, errs);
@@ -215,9 +235,9 @@ where
             let _ = take_until(|t| matches!(t, Break), stream, errs);
             Statement::Malformed
         }
-        Undef => expect_full_line(undef(stream, errs), "undef", stream, errs),
+        Undef => expect_full_line(undef(stream, errs), d, stream, errs),
         Pool => {
-            expect_end_of_line("pool", stream, errs);
+            expect_end_of_line(d, stream, errs);
             Statement::Pool
         }
         Incext => incext(row, col, stream, errs),
@@ -279,7 +299,7 @@ impl IfDefBuffer {
         }
     }
 
-    fn push(&mut self, s: Statement) -> () {
+    fn push(&mut self, s: FilePosAnnot<Statement>) -> () {
         match self.which {
             DefBranch::Def => self.def.push(s),
             DefBranch::Ndef => self.ndef.push(s),
@@ -304,6 +324,7 @@ impl IfDefBuffer {
     }
 }
 
+// `#ifndef c a #else b #endif` is desugared into `#ifdef c b #else a #endif`
 fn ifdef<L>(is_def: bool, stream: &mut L, errs: &mut ErrorLog) -> Statement
 where
     L: Lexer,
@@ -319,7 +340,7 @@ where
         errs
     );
 
-    expect_end_of_line("ifdef", stream, errs);
+    expect_end_of_line(token::Directive::IfDef, stream, errs);
 
     let mut buf = IfDefBuffer::new(if is_def {
         DefBranch::Def
@@ -330,10 +351,10 @@ where
     while let Some(FilePosAnnot { value, row, col }) = stream.next() {
         match value {
             Directive(Endif) => {
-                return expect_full_line(buf.to_statement(s), "endif", stream, errs)
+                return expect_full_line(buf.to_statement(s), Endif, stream, errs)
             }
             Directive(Else) => {
-                expect_end_of_line("else", stream, errs);
+                expect_end_of_line(Else, stream, errs);
                 buf.flip();
             }
             Error(e) => errs.log(FilePosAnnot {
@@ -560,11 +581,11 @@ where
             None => Statement::Malformed,
             Some(args) => {
                 let ts = definition_body(&s, stream.next(), stream, errs);
-                Statement::Define(s, Definition::Macro(args, VecDeque::from(ts)))
+                Statement::Define(s, Definition::Macro(args, ts))
             }
         },
         t @ Some(_) => {
-            let ts = VecDeque::from(definition_body(&s, t, stream, errs));
+            let ts = definition_body(&s, t, stream, errs);
             Statement::Define(s, Definition::Rename(ts))
         }
     }
@@ -621,7 +642,7 @@ where
         Some(FilePosAnnot { value: _, row, col }) => {
             errs.log(FilePosAnnot {
                 value: PreprocError::ExtBadProgram {
-                    directive: "incext",
+                    directive: token::Directive::Incext,
                 },
                 row,
                 col,
@@ -676,7 +697,7 @@ where
         Some(FilePosAnnot { value: _, row, col }) => {
             errs.log(FilePosAnnot {
                 value: PreprocError::ExtBadProgram {
-                    directive: "inctevent",
+                    directive: token::Directive::Inctevent,
                 },
                 row,
                 col,
