@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
@@ -6,12 +6,13 @@ use super::{
     preprocess::syntax as pps,
     syntax,
     syntax::{Node, NodeAnnot, Token, TokenAnnot},
-    token::FilePosAnnot,
 };
-use crate::types::PriorityStack;
+use crate::{
+    location::{FilePosAnnot, Source, SourceAnnot},
+    types::PriorityStack,
+};
 
 mod operators;
-mod stream;
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum Error {
@@ -27,81 +28,12 @@ pub enum Error {
     Malformed,
 }
 
-type ErrorAnnot = FilePosAnnot<Error>;
+type ErrorAnnot<'a> = SourceAnnot<'a, Error>;
 
-pub struct Context {
+pub struct Context<'a> {
     definitions: HashMap<String, pps::Definition>,
-    errors: Vec<ErrorAnnot>,
-}
-
-impl Context {
-    fn push_error(&mut self, err: Error, row: usize, col: usize) -> () {
-        self.errors.push(FilePosAnnot {
-            value: err,
-            row,
-            col,
-        })
-    }
-
-    fn lookup_definition(&self, s: &String) -> Option<&pps::Definition> {
-        self.definitions.get(s)
-    }
-
-    // We take `dst` as a parameter to avoid an extra allocation in the `IfDef`
-    // case.
-    fn to_nodes(&mut self, tree: &pps::Ast, dst: &mut Vec<NodeAnnot>) -> () {
-        use pps::Statement::*;
-
-        for statement in tree {
-            let FilePosAnnot {
-                value: stmt,
-                row,
-                col,
-            } = statement;
-            match stmt {
-                Pool => self.push_error(Error::PoolUnsupported, *row, *col),
-                Malformed => self.push_error(Error::Malformed, *row, *col),
-                Tokens(ts) => self.parse_line(ts, dst),
-                Undef(s) => {
-                    if let None = self.definitions.remove(s) {
-                        self.push_error(
-                            Error::UndefNoSuchDefn { name: s.clone() },
-                            *row,
-                            *col,
-                        );
-                    }
-                }
-                Define(s, d) => {
-                    if let Some(_) = self.definitions.insert(s.clone(), d.clone()) {
-                        self.push_error(
-                            Error::DuplicateMacro { name: s.clone() },
-                            *row,
-                            *col,
-                        );
-                    }
-                }
-                IfDef(s, then, else_) => self.to_nodes(
-                    if self.definitions.contains_key(s) {
-                        then
-                    } else {
-                        else_
-                    },
-                    dst,
-                ),
-            }
-        }
-    }
-
-    fn parse_line(&mut self, tokens: &Vec<TokenAnnot>, dst: &mut Vec<NodeAnnot>) -> () {
-        let mut stream = tokens.iter();
-        while let Some(FilePosAnnot { value, row, col }) = stream.next() {
-            if matches!(value, Token::Semi | Token::Break) {
-                continue;
-            }
-
-            let head = value;
-        }
-    }
+    errors: Vec<ErrorAnnot<'a>>,
+    output: Vec<NodeAnnot<'a>>,
 }
 
 /*

@@ -10,10 +10,13 @@ use super::{
     super::lex::{lex, Lexer, TokenAnnot as LexTokenAnnot},
     syntax::{convert_token, Ast, Definition, Statement, Token, TokenAnnot},
     token,
-    token::{Directive, FilePosAnnot},
+    token::Directive,
     PreprocError,
 };
-use crate::types::writer::{Logger, LoggerContext};
+use crate::{
+    location::FilePosAnnot,
+    types::writer::{Logger, LoggerContext},
+};
 
 use token::Token::*;
 
@@ -387,6 +390,7 @@ fn unquote_definition(
     body: String,
     fname: &String,
 ) -> Option<Output<Vec<Token>>> {
+    // TODO: fix this to use `location::SourceAnnot`
     let loc = format!(
         "definition of {name} (in {fname})",
         name = name,

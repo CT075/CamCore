@@ -15,6 +15,5 @@ async fn test2(co: &Co<i32, ()>) {
 }
 
 fn main() {
-    let xs: Vec<_> = test1().into_iter().collect();
-    assert_eq!(xs, [1, 2, 3, 4, 5]);
+    print!("hello, world!");
 }

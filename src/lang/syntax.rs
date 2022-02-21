@@ -1,9 +1,10 @@
 use std::convert::Infallible;
 
 use super::token;
+use crate::location::{FilePosAnnot, SourceAnnot};
 
 pub type Token = token::Token<Infallible>;
-pub type TokenAnnot = token::FilePosAnnot<Token>;
+pub type TokenAnnot = FilePosAnnot<Token>;
 
 #[derive(Debug, Clone)]
 pub enum Operator {
@@ -51,4 +52,4 @@ pub enum Node {
     Builtin(Builtin, Vec<Expr>),
 }
 
-pub type NodeAnnot = token::FilePosAnnot<Node>;
+pub type NodeAnnot<'a> = SourceAnnot<'a, Node>;

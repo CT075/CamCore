@@ -6,11 +6,11 @@ use relative_path::RelativePathBuf;
 use super::{
     super::lex::{Token as LexToken, TokenAnnot as LexTokenAnnot},
     token,
-    token::FilePosAnnot,
 };
+use crate::location::FilePosAnnot;
 
 pub type Token = token::Token<Infallible>;
-pub type TokenAnnot = token::FilePosAnnot<Token>;
+pub type TokenAnnot = FilePosAnnot<Token>;
 
 pub fn convert_token(t: LexToken) -> Token {
     use token::Token::*;

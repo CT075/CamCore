@@ -1,4 +1,7 @@
-// XXX - maybe we should rip this out and use a real lexer-generator, like logos?
+// It might be worth rewriting this to use a real lexer-generator. Unfortunately,
+// none of the really good Rust ones support nested comments + strings (the former
+// of which actually defies traditional DFA-based regex engines), so we're stuck
+// hand-rolling this for now.
 
 use std::{collections::VecDeque, iter::IntoIterator};
 
@@ -7,10 +10,8 @@ use phf::phf_map;
 use relative_path::RelativePathBuf;
 use thiserror::Error;
 
-use super::{
-    token,
-    token::{Directive, FilePosAnnot},
-};
+use super::{token, token::Directive};
+use crate::location::FilePosAnnot;
 
 mod pathutil;
 
