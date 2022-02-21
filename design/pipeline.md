@@ -43,21 +43,3 @@ division tokens). There are a few ways around this, such as reconstructing the
 file path after lexing, but all of them (as far as I can tell) would require
 tracking whitespace (is `a b/c` a pair of expressions, or a single filepath
 with a parent of `a b`?), which is, in my view, a much greater evil.
-
-## Preprocessing
-
-Preprocessing is broken into two stages. The first stage builds a data
-structure holding contiguous blocks of tokens, separated by directives. The
-output of this stage can be cached in a more structured format for easy lookup
-(so we don't have to read it repeatedly for files that are included multiple
-times).
-
-With regards to caching intermediate reads, it's difficult to be much more
-intelligent without sacrificing semantics. One idea might be to also collect
-all definitions from included files (and the `ifdef`s they're underneath), but
-I chose to go with the simpler approach for now.
-
-The second stage of preprocessing processes this structure, potentially kicking
-off new pipelines whenever an include (or `#inctext` etc) is encountered, and
-otherwise transforming the token blocks.
-
