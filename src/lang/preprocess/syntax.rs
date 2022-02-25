@@ -3,10 +3,11 @@ use std::collections::VecDeque;
 use indexmap::set::IndexSet;
 use relative_path::RelativePathBuf;
 
-use super::{
-    super::lex::{Token, TokenAnnot},
-    PreprocError,
-};
+#[derive(Debug, PartialEq, Eq)]
+pub struct Token();
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct TokenAnnot();
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Definition {
@@ -24,11 +25,6 @@ pub enum Statement {
     Pool,
     Define(String, Definition),
     Undef(String),
-    Malformed {
-        why: PreprocError,
-        row: usize,
-        col: usize,
-    },
     Incext(RelativePathBuf, Vec<Token>),
     Inctevent(RelativePathBuf, Vec<Token>),
 }
