@@ -117,3 +117,10 @@ fn test_block_comments() {
         Err(vec![LexError::UnclosedComment])
     );
 }
+
+#[test]
+fn edge_cases() {
+    // vanilla EA does not emit a newline here
+    let mid_line_block_comment = r#"A /*
+    */ B"#;
+}

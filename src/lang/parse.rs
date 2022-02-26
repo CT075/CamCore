@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use super::syntax::{Directive, Span, Token, WithLocation};
+use super::syntax::{Directive, MessageContent, Span, Token, WithLocation};
 
 use chumsky::{error::Error as ChumskyError, prelude::*};
 
@@ -35,49 +35,29 @@ pub trait GenericParseErrorHandler<I> {
     ) -> Self;
 }
 
-// Lexing, directive parsing and MESSAGE
-
-// This needs to be ['static] to make some of the recursive parsers work, and
-// is probably good practice anyways.
-pub trait LexErrorHandler: GenericParseErrorHandler<char> + 'static {
-    fn unclosed_comment(span: Span) -> Self;
-}
-
-#[derive(Copy, Clone)]
-enum LexKind {
-    BlockComment,
-}
-
-impl<E> ChumskyError<char> for Carrier<char, E>
+impl<I, E> Carrier<I, E>
 where
-    E: LexErrorHandler,
+    I: PartialEq + Eq + std::hash::Hash + Clone + Copy,
 {
-    type Span = Span;
-    type Label = LexKind;
-
-    fn expected_input_found<I>(
-        span: Self::Span,
-        expected: I,
-        found: Option<char>,
-    ) -> Self
+    fn generic_parse_error<Iter>(span: Span, expected: Iter, found: Option<I>) -> Self
     where
-        I: IntoIterator<Item = Option<char>>,
+        Iter: IntoIterator<Item = Option<I>>,
     {
-        Carrier::GenericParseError {
+        Self::GenericParseError {
             span,
             expected: expected.into_iter().collect(),
             found,
         }
     }
 
-    fn unclosed_delimiter(
-        unclosed_span: Self::Span,
-        unclosed: char,
-        span: Self::Span,
-        expected: char,
-        found: Option<char>,
+    fn unclosed_delimiter_impl(
+        unclosed_span: Span,
+        unclosed: I,
+        span: Span,
+        expected: I,
+        found: Option<I>,
     ) -> Self {
-        Carrier::GenericUnclosedDelimiter {
+        Self::GenericUnclosedDelimiter {
             unclosed_span,
             unclosed,
             span,
@@ -86,7 +66,7 @@ where
         }
     }
 
-    fn merge(mut self, other: Self) -> Self {
+    fn merge_impl(mut self, other: Self) -> Self {
         use Carrier::*;
 
         match (&mut self, &other) {
@@ -112,6 +92,52 @@ where
         }
 
         self
+    }
+}
+
+// Lexing, directive parsing and MESSAGE
+
+// This needs to be ['static] to make some of the recursive parsers work, and
+// is probably good practice anyways.
+pub trait LexErrorHandler: 'static {
+    fn unclosed_comment(span: Span) -> Self;
+}
+
+#[derive(Copy, Clone)]
+enum LexKind {
+    BlockComment,
+}
+
+impl<E> ChumskyError<char> for Carrier<char, E>
+where
+    E: LexErrorHandler,
+{
+    type Span = Span;
+    type Label = LexKind;
+
+    fn expected_input_found<I>(
+        span: Self::Span,
+        expected: I,
+        found: Option<char>,
+    ) -> Self
+    where
+        I: IntoIterator<Item = Option<char>>,
+    {
+        Self::generic_parse_error(span, expected, found)
+    }
+
+    fn unclosed_delimiter(
+        unclosed_span: Self::Span,
+        unclosed: char,
+        span: Self::Span,
+        expected: char,
+        found: Option<char>,
+    ) -> Self {
+        Self::unclosed_delimiter_impl(unclosed_span, unclosed, span, expected, found)
+    }
+
+    fn merge(self, other: Self) -> Self {
+        Self::merge_impl(self, other)
     }
 
     fn with_label(self, label: Self::Label) -> Self {
@@ -141,6 +167,7 @@ where
 enum FirstPassOut {
     Token(Token),
     Directive(Directive),
+    Message(Vec<MessageContent>),
 }
 
 fn line_comment<E>() -> impl Parser<char, (), Error = Carrier<char, E>> + Clone

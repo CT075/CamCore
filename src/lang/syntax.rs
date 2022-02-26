@@ -16,6 +16,12 @@ pub struct WithLocation<'a, T> {
 }
 
 #[derive(Debug, Clone)]
+pub enum MessageContent {
+    Verbatim(String),
+    CurrentOffset,
+}
+
+#[derive(Debug, Clone)]
 pub enum Directive {
     Define,
     Include,
