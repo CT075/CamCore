@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use super::*;
+use super::{super::GenericParseErrorHandler, *};
 
 impl GenericParseErrorHandler<char> for LexError {
     fn expected(
