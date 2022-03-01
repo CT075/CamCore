@@ -1,4 +1,5 @@
 pub mod generic;
+pub mod hkt;
 
 pub enum Void {}
 

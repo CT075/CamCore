@@ -1,3 +1,5 @@
+use crate::types::hkt::{Apply, VecW, Witness};
+
 use super::{Carrier, Directive, MessageContent, Span, Token, WithLocation};
 
 use chumsky::{error::Error as ChumskyError, prelude::*};
@@ -74,10 +76,23 @@ where
     }
 }
 
-enum FirstPassOut {
-    Token(Token),
+// This is a trick known as "higher-kinded data", where we know that the
+// [Token] variant will always contain something that uses the [Token] type,
+// but want to be generic over the "shape" of that something. In this case,
+// it's more convenient to parse by lines, in which we'll want to use
+// [Vec<Token>]. However, we'd like the actual output of this phase to just be
+// a flat list of tokens, so that variant should just contain regular [Token].
+//
+// You can read more about this approach here:
+//   https://reasonablypolymorphic.com/blog/higher-kinded-data/
+//
+// It's a bit uglier than what you'd see in Haskell, since Rust doesn't support
+// higher kinded types as a first-class construct, so we have to get a bit
+// cleverer with our embedding (see [hkt.rs]).
+enum Out<F: Witness<Token>> {
+    Token(F::This),
     Directive(Directive),
-    Message(Vec<MessageContent>),
+    Message(MessageContent),
 }
 
 fn line_comment<E>() -> impl Parser<char, (), Error = Carrier<char, E>> + Clone
@@ -118,18 +133,22 @@ where
     .labelled(LexKind::BlockComment)
 }
 
-fn first_pass<'a, E>(
-) -> impl Parser<char, Vec<WithLocation<'a, FirstPassOut>>, Error = Carrier<char, E>>
+fn comment<E>() -> impl Parser<char, (), Error = Carrier<char, E>> + Clone
 where
     E: LexErrorHandler,
 {
-    let token = todo();
-
     let line_comment = line_comment();
-
     let block_comment = block_comment();
 
-    let comment = line_comment.or(block_comment);
+    line_comment.or(block_comment)
+}
 
-    token.padded_by(comment.repeated()).padded().repeated()
+fn parser<'a, E>(
+) -> impl Parser<char, Vec<WithLocation<'a, Out<VecW>>>, Error = Carrier<char, E>>
+where
+    E: LexErrorHandler,
+{
+    let line = todo();
+
+    line.padded_by(comment().repeated()).repeated()
 }
