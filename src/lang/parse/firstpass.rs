@@ -1,4 +1,6 @@
-use crate::types::hkt::{Apply, VecW, Witness};
+// Lexing, directive parsing and MESSAGE
+
+use crate::types::hkt::{Apply, ConstW, VecW, Witness};
 
 use super::{Carrier, Directive, MessageContent, Span, Token, WithLocation};
 
@@ -6,8 +8,6 @@ use chumsky::{error::Error as ChumskyError, prelude::*};
 
 #[cfg(test)]
 mod tests;
-
-// Lexing, directive parsing and MESSAGE
 
 // This needs to be ['static] to make some of the recursive parsers work, and
 // is probably good practice anyways.
@@ -89,11 +89,13 @@ where
 // It's a bit uglier than what you'd see in Haskell, since Rust doesn't support
 // higher kinded types as a first-class construct, so we have to get a bit
 // cleverer with our embedding (see [hkt.rs]).
-enum Out<F: Witness<Token>> {
+enum OutImpl<'a, F: Witness<WithLocation<'a, Token>>> {
     Token(F::This),
-    Directive(Directive),
-    Message(MessageContent),
+    Directive(WithLocation<'a, Directive>),
+    Message(Vec<WithLocation<'a, MessageContent>>),
 }
+
+pub type Out<'a> = OutImpl<'a, ConstW>;
 
 fn line_comment<E>() -> impl Parser<char, (), Error = Carrier<char, E>> + Clone
 where
@@ -143,12 +145,11 @@ where
     line_comment.or(block_comment)
 }
 
-fn parser<'a, E>(
-) -> impl Parser<char, Vec<WithLocation<'a, Out<VecW>>>, Error = Carrier<char, E>>
+fn parser<'a, E>() -> impl Parser<char, Vec<OutImpl<'a, VecW>>, Error = Carrier<char, E>>
 where
     E: LexErrorHandler,
 {
     let line = todo();
 
-    line.padded_by(comment().repeated()).repeated()
+    line.padded_by(comment().repeated()).padded().repeated()
 }

@@ -1,9 +1,14 @@
 // Implementation of "Lightweight Higher Kinded Types" by Jeremie Yallop and
 // Leo White.
+//
+// We could, in theory, use
 
 pub trait Witness<A>: Sized {
     type This;
 
+    // This is to enforce that the witness is phantom-only. This isn't
+    // foolproof; you can also easily use [panic!()] or an infinite loop, but
+    // the idea is the same.
     fn absurd(self) -> std::convert::Infallible;
 }
 
