@@ -39,7 +39,7 @@ pub enum Directive {
 #[derive(Debug, Clone)]
 pub enum Token {
     Ident(String),
-    Number(u32),
+    Number { payload: String, radix: usize },
     QuotedString(String),
     Colon,
     Dash,

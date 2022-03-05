@@ -63,26 +63,41 @@ fn lex<O>(
 enum LexError {
     Unlabeled(Span, HashSet<Option<char>>, Option<char>),
     UnclosedComment,
+    BadNumber(u32),
 }
 
 impl LexErrorHandler for LexError {
-    fn unclosed_comment(span: Span) -> Self {
+    fn unclosed_comment(_span: Span) -> Self {
         Self::UnclosedComment
+    }
+
+    fn bad_number(radix: u32, _span: Span) -> Self {
+        Self::BadNumber(radix)
     }
 }
 
 #[test]
-fn test_line_comments() {
+fn line_comment_basic() {
     let line_comment = super::line_comment::<LexError>().then_ignore(end());
 
     let basic = r#"// this is a line comment
     "#;
 
     assert_eq!(lex(line_comment.clone(), basic), Ok(()));
+}
+
+#[test]
+fn line_comment_eof() {
+    let line_comment = super::line_comment::<LexError>().then_ignore(end());
 
     let eof = r#"// this is a line comment"#;
 
     assert_eq!(lex(line_comment.clone(), eof), Ok(()));
+}
+
+#[test]
+fn line_comment_escaped() {
+    let line_comment = super::line_comment::<LexError>().then_ignore(end());
 
     let escaped = r#"// this is a line comment \
                   that is escaped"#;
@@ -91,17 +106,36 @@ fn test_line_comments() {
 }
 
 #[test]
-fn test_block_comments() {
+fn block_comment_basic() {
     let block_comment = super::block_comment::<LexError>().then_ignore(end());
 
     let basic = r#"/* comment
         */"#;
 
     assert_eq!(lex(block_comment.clone(), basic), Ok(()));
+}
+
+#[test]
+fn block_comment_no_contents() {
+    let block_comment = super::block_comment::<LexError>().then_ignore(end());
+
+    let basic = r#"/**/"#;
+
+    assert_eq!(lex(block_comment.clone(), basic), Ok(()));
+}
+
+#[test]
+fn block_comment_nested() {
+    let block_comment = super::block_comment::<LexError>().then_ignore(end());
 
     let nested = r#"/* a /* b */ c */"#;
 
     assert_eq!(lex(block_comment.clone(), nested), Ok(()));
+}
+
+#[test]
+fn block_comment_containing_line_comment() {
+    let block_comment = super::block_comment::<LexError>().then_ignore(end());
 
     let with_line = r#"/*
       // this line is commented */
@@ -109,6 +143,11 @@ fn test_block_comments() {
       "#;
 
     assert_eq!(lex(block_comment.clone(), with_line), Ok(()));
+}
+
+#[test]
+fn block_comment_basic_unclosed() {
+    let block_comment = super::block_comment::<LexError>().then_ignore(end());
 
     let unclosed = r#"/*"#;
 
@@ -116,6 +155,90 @@ fn test_block_comments() {
         lex(block_comment.clone(), unclosed),
         Err(vec![LexError::UnclosedComment])
     );
+}
+
+#[test]
+fn block_comment_nested_unclosed() {
+    let block_comment = super::block_comment::<LexError>().then_ignore(end());
+
+    let nested = r#"/* /* */"#;
+
+    assert_eq!(
+        lex(block_comment.clone(), nested),
+        Err(vec![LexError::UnclosedComment])
+    );
+}
+
+#[test]
+fn decimal() {
+    let number = super::number::<LexError>().then_ignore(end());
+
+    let n = r#"1234"#;
+
+    assert_eq!(lex(number.clone(), n), Ok(("1234".to_string(), 10)))
+}
+
+#[test]
+fn hex_with_0x() {
+    let number = super::number::<LexError>().then_ignore(end());
+
+    let n = r#"0x01234"#;
+
+    assert_eq!(lex(number.clone(), n), Ok(("01234".to_string(), 16)))
+}
+
+#[test]
+fn hex_with_dollar() {
+    let number = super::number::<LexError>().then_ignore(end());
+
+    let n = r#"$1234"#;
+
+    assert_eq!(lex(number.clone(), n), Ok(("1234".to_string(), 16)))
+}
+
+#[test]
+fn binary_lowercase() {
+    let number = super::number::<LexError>().then_ignore(end());
+
+    let n = r#"0110110b"#;
+
+    assert_eq!(lex(number.clone(), n), Ok(("0110110".to_string(), 2)))
+}
+
+#[test]
+fn binary_uppercase() {
+    let number = super::number::<LexError>().then_ignore(end());
+
+    let n = r#"0110110B"#;
+
+    assert_eq!(lex(number.clone(), n), Ok(("0110110".to_string(), 2)))
+}
+
+#[test]
+fn bad_decimal() {
+    let number = super::number::<LexError>().then_ignore(end());
+
+    let n = r#"1234a"#;
+
+    assert_eq!(lex(number.clone(), n), Ok(("1234a".to_string(), 10)))
+}
+
+#[test]
+fn bad_hex() {
+    let number = super::number::<LexError>().then_ignore(end());
+
+    let n = r#"0x1234Z"#;
+
+    assert_eq!(lex(number.clone(), n), Ok(("1234Z".to_string(), 16)))
+}
+
+#[test]
+fn bad_binary() {
+    let number = super::number::<LexError>().then_ignore(end());
+
+    let n = r#"311111b"#;
+
+    assert_eq!(lex(number.clone(), n), Ok(("311111".to_string(), 2)))
 }
 
 #[test]
