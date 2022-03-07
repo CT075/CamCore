@@ -1,11 +1,13 @@
 use std::collections::HashSet;
 
-use super::syntax::{Directive, MessageContent, Span, Token, WithLocation};
+use super::syntax::{
+    Directive, Location, MessageContent, Span, Token, WithLocation,
+};
 
-mod firstpass;
+pub mod firstpass;
 
 #[derive(Debug)]
-enum Carrier<I, E> {
+pub enum Carrier<I, E> {
     GenericParseError {
         span: Span,
         expected: HashSet<Option<I>>,
@@ -22,7 +24,11 @@ enum Carrier<I, E> {
 }
 
 pub trait GenericParseErrorHandler<I> {
-    fn expected(span: Span, expected: HashSet<Option<I>>, found: Option<I>) -> Self;
+    fn expected(
+        span: Span,
+        expected: HashSet<Option<I>>,
+        found: Option<I>,
+    ) -> Self;
 
     fn unclosed_delimiter(
         span: Span,
@@ -35,8 +41,13 @@ pub trait GenericParseErrorHandler<I> {
 impl<I, E> Carrier<I, E>
 where
     I: PartialEq + Eq + std::hash::Hash + Clone + Copy,
+    E: GenericParseErrorHandler<I>,
 {
-    fn generic_parse_error<Iter>(span: Span, expected: Iter, found: Option<I>) -> Self
+    fn generic_parse_error<Iter>(
+        span: Span,
+        expected: Iter,
+        found: Option<I>,
+    ) -> Self
     where
         Iter: IntoIterator<Item = Option<I>>,
     {
@@ -89,5 +100,23 @@ where
         }
 
         self
+    }
+
+    fn into(self) -> E {
+        match self {
+            Self::Specific(e) => e,
+            Self::GenericParseError {
+                span,
+                expected,
+                found,
+            } => E::expected(span, expected, found),
+            Self::GenericUnclosedDelimiter {
+                unclosed_span: _,
+                unclosed,
+                span,
+                expected,
+                found,
+            } => E::unclosed_delimiter(span, unclosed, expected, found),
+        }
     }
 }

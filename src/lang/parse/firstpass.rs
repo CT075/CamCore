@@ -2,7 +2,10 @@
 
 use crate::types::hkt::{ConstW, VecW, Witness};
 
-use super::{Carrier, Directive, MessageContent, Span, Token, WithLocation};
+use super::{
+    Carrier, Directive, GenericParseErrorHandler, Location, MessageContent,
+    Span, Token, WithLocation,
+};
 
 use chumsky::{error::Error as ChumskyError, prelude::*};
 
@@ -11,16 +14,16 @@ mod tests;
 
 // This needs to be ['static] to make some of the recursive parsers work, and
 // is probably good practice anyways.
-pub trait LexErrorHandler: 'static {
+pub trait LexErrorHandler: GenericParseErrorHandler<char> + 'static {
     fn unclosed_comment(span: Span) -> Self;
 
-    fn bad_number(radix: u32, span: Span) -> Self;
+    fn unclosed_string_literal(span: Span) -> Self;
 }
 
 #[derive(Copy, Clone)]
 pub enum LexKind {
     BlockComment,
-    Number(u32),
+    String,
 }
 
 impl<E> ChumskyError<char> for Carrier<char, E>
@@ -62,26 +65,26 @@ where
     }
 
     fn with_label(self, label: Self::Label) -> Self {
-        let (span, found) = match self {
+        let span = match self {
             Carrier::GenericParseError {
                 span,
                 expected: _,
-                found,
-            } => (span, found),
+                found: _,
+            } => span,
             Carrier::GenericUnclosedDelimiter {
                 unclosed_span: _,
                 unclosed: _,
                 span,
                 expected: _,
-                found,
-            } => (span, found),
+                found: _,
+            } => span,
             Carrier::Specific(_) => return self,
         };
 
         use LexKind::*;
         Carrier::Specific(match label {
             BlockComment => E::unclosed_comment(span),
-            Number(radix) => E::bad_number(radix, span),
+            String => E::unclosed_string_literal(span),
         })
     }
 }
@@ -99,7 +102,7 @@ where
 // It's a bit uglier than what you'd see in Haskell, since Rust doesn't support
 // higher kinded types as a first-class construct, so we have to get a bit
 // cleverer with our embedding (see [hkt.rs]).
-enum OutImpl<'a, F: Witness<WithLocation<'a, Token>>> {
+pub enum OutImpl<'a, F: Witness<WithLocation<'a, Token>>> {
     Token(F::This),
     Directive(WithLocation<'a, Directive>),
     Message(Vec<WithLocation<'a, MessageContent>>),
@@ -195,17 +198,96 @@ where
     hex.or(bin_or_dec).padded()
 }
 
+fn quoted_string<E>(
+) -> impl Parser<char, String, Error = Carrier<char, E>> + Clone
+where
+    E: LexErrorHandler,
+{
+    let escape = just('\\').ignore_then(
+        just('\\')
+            .or(just('/'))
+            .or(just('"'))
+            .or(just('b').to('\x08'))
+            .or(just('f').to('\x0C'))
+            .or(just('n').to('\n'))
+            .or(just('r').to('\r'))
+            .or(just('t').to('\t')),
+    );
+
+    just('"')
+        .ignore_then(
+            filter(|c| *c != '\\' && *c != '"' && *c != '\n')
+                .or(escape)
+                .repeated(),
+        )
+        .then_ignore(just('"'))
+        .collect::<String>()
+        .labelled(LexKind::String)
+}
+
 fn token<E>() -> impl Parser<char, Token, Error = Carrier<char, E>> + Clone
 where
     E: LexErrorHandler,
 {
     let ident = text::ident();
     let number = number();
+    let quoted_string = quoted_string();
 
     choice((
         ident.map(Token::Ident),
         number.map(|(payload, radix)| Token::Number { payload, radix }),
+        quoted_string.map(Token::QuotedString),
+        just(':').to(Token::Colon),
+        just("--").to(Token::Emdash),
+        just('-').to(Token::Dash),
+        just('/')
+            .then_ignore(none_of("*/").rewind())
+            .to(Token::Slash),
+        just('*').then_ignore(none_of("/").rewind()).to(Token::Star),
+        just('+').to(Token::Plus),
+        just('%').to(Token::Percent),
+        just('&').to(Token::Ampersand),
+        just('|').to(Token::Bar),
+        just('^').to(Token::Caret),
+        just('.').to(Token::Dot),
+        just("<<").to(Token::LShift),
+        just(">>").to(Token::RShift),
+        just(",").to(Token::Comma),
+        just("{").to(Token::LCurly),
+        just("}").to(Token::RCurly),
+        just("(").to(Token::LParen),
+        just(")").to(Token::RParen),
+        just("[").to(Token::LBrack),
+        just("]").to(Token::RBrack),
+        just("<").to(Token::LAngle),
+        just(">").to(Token::RAngle),
     ))
+}
+
+// This is roughly the "end of the line", but also includes [;].
+//
+// TODO: Currently, in the following input, [A] and [B] are considered to be on
+// "the same line".
+//
+// ```
+// A /* comment with a line break
+//    */ B
+// ```
+//
+// Arguments could be made either way for whether this is intuitive, but it
+// isn't sufficient to just use [block_comment] as the end of the statement,
+// because we also have to handle this case:
+//
+// ```
+// A /* comment without a line break */ B
+// ```
+fn statement_break<E>(
+) -> impl Parser<char, Token, Error = Carrier<char, E>> + Clone
+where
+    E: LexErrorHandler,
+{
+    choice((just('\n').ignored(), just(';').ignored(), line_comment()))
+        .to(Token::Break)
 }
 
 fn parser<'a, E>(
@@ -213,7 +295,50 @@ fn parser<'a, E>(
 where
     E: LexErrorHandler,
 {
-    let line = todo();
+    let line = token()
+        .map_with_span(|value, span| WithLocation {
+            value,
+            loc: Location {
+                owner: None,
+                span: Some(span),
+                needed_by: None,
+            },
+        })
+        .padded_by(block_comment().repeated())
+        .padded()
+        .repeated()
+        .then(statement_break().map_with_span(|value, span| WithLocation {
+            value,
+            loc: Location {
+                owner: None,
+                span: Some(span),
+                needed_by: None,
+            },
+        }))
+        .map(|(mut tokens, brk)| {
+            tokens.push(brk);
+            OutImpl::Token(tokens)
+        });
 
     line.padded_by(comment().repeated()).padded().repeated()
+}
+
+fn flatten<'a>(v: Vec<OutImpl<'a, VecW>>) -> Vec<Out<'a>> {
+    v.into_iter()
+        .flat_map(|item| match item {
+            OutImpl::Token(toks) => toks.into_iter().map(Out::Token).collect(),
+            OutImpl::Directive(d) => vec![Out::Directive(d)],
+            OutImpl::Message(msg) => vec![Out::Message(msg)],
+        })
+        .collect()
+}
+
+pub fn parse<'a, 'b, E>(s: &'b str) -> Result<Vec<Out<'a>>, Vec<E>>
+where
+    E: LexErrorHandler,
+{
+    parser()
+        .parse(s)
+        .map(flatten)
+        .map_err(|errs| errs.into_iter().map(Carrier::into).collect())
 }

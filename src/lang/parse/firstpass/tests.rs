@@ -63,7 +63,7 @@ fn lex<O>(
 enum LexError {
     Unlabeled(Span, HashSet<Option<char>>, Option<char>),
     UnclosedComment,
-    BadNumber(u32),
+    UnclosedString,
 }
 
 impl LexErrorHandler for LexError {
@@ -71,8 +71,8 @@ impl LexErrorHandler for LexError {
         Self::UnclosedComment
     }
 
-    fn bad_number(radix: u32, _span: Span) -> Self {
-        Self::BadNumber(radix)
+    fn unclosed_string_literal(_span: Span) -> Self {
+        Self::UnclosedString
     }
 }
 
@@ -239,6 +239,33 @@ fn bad_binary() {
     let n = r#"311111b"#;
 
     assert_eq!(lex(number.clone(), n), Ok(("311111".to_string(), 2)))
+}
+
+#[test]
+fn quoted_string_basic() {
+    let string = super::quoted_string::<LexError>().then_ignore(end());
+
+    let s = r#""abcde""#;
+
+    assert_eq!(lex(string.clone(), s), Ok("abcde".to_string()))
+}
+
+#[test]
+fn quoted_string_escapes() {
+    let string = super::quoted_string::<LexError>().then_ignore(end());
+
+    let s = r#""\"\\""#;
+
+    assert_eq!(lex(string.clone(), s), Ok("\"\\".to_string()))
+}
+
+#[test]
+fn quoted_string_unclosed() {
+    let string = super::quoted_string::<LexError>().then_ignore(end());
+
+    let s = r#""not closed"#;
+
+    assert_eq!(lex(string.clone(), s), Err(vec![LexError::UnclosedString]))
 }
 
 #[test]

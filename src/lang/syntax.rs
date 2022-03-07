@@ -49,9 +49,9 @@ pub enum Token {
     Plus,
     Percent,
     Ampersand,
-    Dot,
     Bar,
     Caret,
+    Dot,
     LShift,
     RShift,
     //Hash,
@@ -65,5 +65,4 @@ pub enum Token {
     LAngle,
     RAngle,
     Break,
-    Semi,
 }
