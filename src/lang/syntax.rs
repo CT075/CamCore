@@ -2,26 +2,20 @@ use std::ops::Range;
 
 pub type Span = Range<usize>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Location<'a> {
     pub span: Option<Span>,
     pub owner: Option<&'a str>,
     pub needed_by: Option<Box<Location<'a>>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WithLocation<'a, T> {
     pub value: T,
     pub loc: Location<'a>,
 }
 
-#[derive(Debug, Clone)]
-pub enum MessageContent {
-    Verbatim(String),
-    CurrentOffset,
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Directive {
     Define,
     Include,
@@ -36,7 +30,7 @@ pub enum Directive {
     Undef,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     Ident(String),
     Number { payload: String, radix: usize },

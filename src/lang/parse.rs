@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 
-use super::syntax::{
-    Directive, Location, MessageContent, Span, Token, WithLocation,
-};
+use super::syntax::{Directive, Location, Span, Token, WithLocation};
 
 pub mod firstpass;
 

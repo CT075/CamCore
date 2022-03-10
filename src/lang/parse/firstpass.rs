@@ -3,8 +3,8 @@
 use crate::types::hkt::{ConstW, VecW, Witness};
 
 use super::{
-    Carrier, Directive, GenericParseErrorHandler, Location, MessageContent,
-    Span, Token, WithLocation,
+    Carrier, Directive, GenericParseErrorHandler, Location, Span, Token,
+    WithLocation,
 };
 
 use chumsky::{error::Error as ChumskyError, prelude::*};
@@ -105,7 +105,48 @@ where
 pub enum OutImpl<'a, F: Witness<WithLocation<'a, Token>>> {
     Token(F::This),
     Directive(WithLocation<'a, Directive>),
-    Message(Vec<WithLocation<'a, MessageContent>>),
+    Message(String),
+}
+
+impl<'a, F> std::fmt::Debug for OutImpl<'a, F>
+where
+    F: Witness<WithLocation<'a, Token>>,
+    F::This: std::fmt::Debug,
+{
+    fn fmt(
+        &self,
+        fmt: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
+        match self {
+            Self::Token(ts) => fmt.debug_tuple("Token").field(ts).finish(),
+            Self::Directive(ds) => {
+                fmt.debug_tuple("Directive").field(ds).finish()
+            }
+            Self::Message(s) => fmt.debug_tuple("Message").field(s).finish(),
+        }
+    }
+}
+
+impl<'a, F> PartialEq for OutImpl<'a, F>
+where
+    F: Witness<WithLocation<'a, Token>>,
+    F::This: Eq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Token(t1), Self::Token(t2)) => t1 == t2,
+            (Self::Directive(ds1), Self::Directive(ds2)) => ds1 == ds2,
+            (Self::Message(m1), Self::Message(m2)) => m1 == m2,
+            _ => false,
+        }
+    }
+}
+
+impl<'a, F> Eq for OutImpl<'a, F>
+where
+    F: Witness<WithLocation<'a, Token>>,
+    F::This: Eq,
+{
 }
 
 pub type Out<'a> = OutImpl<'a, ConstW>;
@@ -207,6 +248,7 @@ where
         just('\\')
             .or(just('/'))
             .or(just('"'))
+            .or(just('\n'))
             .or(just('b').to('\x08'))
             .or(just('f').to('\x0C'))
             .or(just('n').to('\n'))
@@ -225,7 +267,7 @@ where
         .labelled(LexKind::String)
 }
 
-fn token<E>() -> impl Parser<char, Token, Error = Carrier<char, E>> + Clone
+fn token<E>() -> impl Parser<char, Token, Error = Carrier<char, E>>
 where
     E: LexErrorHandler,
 {
@@ -241,26 +283,30 @@ where
         just("--").to(Token::Emdash),
         just('-').to(Token::Dash),
         just('/')
-            .then_ignore(none_of("*/").rewind())
+            .then_ignore(none_of("/").rewind())
             .to(Token::Slash),
-        just('*').then_ignore(none_of("/").rewind()).to(Token::Star),
+        just('*').to(Token::Star),
         just('+').to(Token::Plus),
         just('%').to(Token::Percent),
         just('&').to(Token::Ampersand),
-        just('|').to(Token::Bar),
-        just('^').to(Token::Caret),
-        just('.').to(Token::Dot),
-        just("<<").to(Token::LShift),
-        just(">>").to(Token::RShift),
-        just(",").to(Token::Comma),
-        just("{").to(Token::LCurly),
-        just("}").to(Token::RCurly),
-        just("(").to(Token::LParen),
-        just(")").to(Token::RParen),
-        just("[").to(Token::LBrack),
-        just("]").to(Token::RBrack),
-        just("<").to(Token::LAngle),
-        just(">").to(Token::RAngle),
+        // we need this nested [choice] here because the parser bounds on
+        // [choice] haven't been defined for tuples this big
+        choice((
+            just('|').to(Token::Bar),
+            just('^').to(Token::Caret),
+            just('.').to(Token::Dot),
+            just("<<").to(Token::LShift),
+            just(">>").to(Token::RShift),
+            just(",").to(Token::Comma),
+            just("{").to(Token::LCurly),
+            just("}").to(Token::RCurly),
+            just("(").to(Token::LParen),
+            just(")").to(Token::RParen),
+            just("[").to(Token::LBrack),
+            just("]").to(Token::RBrack),
+            just("<").to(Token::LAngle),
+            just(">").to(Token::RAngle),
+        )),
     ))
 }
 
@@ -304,8 +350,13 @@ where
                 needed_by: None,
             },
         })
-        .padded_by(block_comment().repeated())
-        .padded()
+        .padded_by(
+            block_comment()
+                .or(just('\\').ignore_then(just('\n')).ignored())
+                .or(filter(move |c: &char| c.is_whitespace() && *c != '\n')
+                    .ignored())
+                .repeated(),
+        )
         .repeated()
         .then(statement_break().map_with_span(|value, span| WithLocation {
             value,
@@ -320,7 +371,23 @@ where
             OutImpl::Token(tokens)
         });
 
-    line.padded_by(comment().repeated()).padded().repeated()
+    let message = just("MESSAGE")
+        .padded()
+        .ignore_then(
+            just('\\')
+                .ignore_then(just('\n'))
+                .or(filter(move |c: &char| *c != '\n'))
+                .repeated()
+                .collect::<String>(),
+        )
+        .map(OutImpl::Message)
+        .then_ignore(just('\n').ignored());
+
+    message
+        .or(line)
+        .padded_by(comment().repeated())
+        .padded()
+        .repeated()
 }
 
 fn flatten<'a>(v: Vec<OutImpl<'a, VecW>>) -> Vec<Out<'a>> {
@@ -333,10 +400,17 @@ fn flatten<'a>(v: Vec<OutImpl<'a, VecW>>) -> Vec<Out<'a>> {
         .collect()
 }
 
-pub fn parse<'a, 'b, E>(s: &'b str) -> Result<Vec<Out<'a>>, Vec<E>>
+pub fn parse<'a, E>(s: impl AsRef<str>) -> Result<Vec<Out<'a>>, Vec<E>>
 where
     E: LexErrorHandler,
 {
+    // This is a huge hack. Currently, chumsky does not handle repetition of
+    // things like "end of line or end of input" very well, so we force an
+    // end-of-line at the end of the input.
+    let mut s: String = s.as_ref().to_owned();
+    s.push('\n');
+    let s = s;
+
     parser()
         .parse(s)
         .map(flatten)
