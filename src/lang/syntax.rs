@@ -15,19 +15,38 @@ pub struct WithLocation<'a, T> {
     pub loc: Location<'a>,
 }
 
+// The point of this trait is to allow us to use the same [Directive] enum
+// with both parsed and unparsed arguments. In practice, implementors of this
+// trait will have all types as [String] (unparsed), structured data with
+// string/vars interpolated (parsed and unexpanded), or structured data with
+// just strings (parsed and expanded).
+pub trait DirectiveArgs {
+    type Define: std::fmt::Debug + PartialEq + Eq + Clone;
+    type Include: std::fmt::Debug + PartialEq + Eq + Clone;
+    type Incbin: std::fmt::Debug + PartialEq + Eq + Clone;
+    type Incext: std::fmt::Debug + PartialEq + Eq + Clone;
+    type Inctevent: std::fmt::Debug + PartialEq + Eq + Clone;
+    type IfDef: std::fmt::Debug + PartialEq + Eq + Clone;
+    type IfNDef: std::fmt::Debug + PartialEq + Eq + Clone;
+    type Else: std::fmt::Debug + PartialEq + Eq + Clone;
+    type Endif: std::fmt::Debug + PartialEq + Eq + Clone;
+    type Pool: std::fmt::Debug + PartialEq + Eq + Clone;
+    type Undef: std::fmt::Debug + PartialEq + Eq + Clone;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Directive {
-    Define,
-    Include,
-    Incbin,
-    Incext,
-    Inctevent,
-    IfDef,
-    IfNDef,
-    Else,
-    Endif,
-    Pool,
-    Undef,
+pub enum Directive<Args: DirectiveArgs> {
+    Define(Args::Define),
+    Include(Args::Include),
+    Incbin(Args::Incbin),
+    Incext(Args::Incext),
+    Inctevent(Args::Inctevent),
+    IfDef(Args::IfDef),
+    IfNDef(Args::IfNDef),
+    Else(Args::Else),
+    Endif(Args::Endif),
+    Pool(Args::Pool),
+    Undef(Args::Undef),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

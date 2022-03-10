@@ -5,7 +5,7 @@ use super::{super::GenericParseErrorHandler, *};
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum OutStripped {
     Token(Token),
-    Directive(Directive),
+    Directive(Directive<UnparsedDirective>),
     Message(String),
 }
 
@@ -32,33 +32,6 @@ impl GenericParseErrorHandler<char> for LexError {
     }
 }
 
-fn uncarrier<I, E>(errors: Vec<Carrier<I, E>>) -> Vec<E>
-where
-    E: GenericParseErrorHandler<I>,
-{
-    errors
-        .into_iter()
-        .map(|item| {
-            use Carrier::*;
-            match item {
-                GenericParseError {
-                    span,
-                    expected,
-                    found,
-                } => E::expected(span, expected, found),
-                GenericUnclosedDelimiter {
-                    unclosed_span: _,
-                    unclosed,
-                    span,
-                    expected,
-                    found,
-                } => E::unclosed_delimiter(span, unclosed, expected, found),
-                Specific(e) => e,
-            }
-        })
-        .collect()
-}
-
 fn run_parser<O>(
     parser: impl Parser<char, O, Error = Carrier<char, LexError>>,
     text: &'static str,
@@ -78,7 +51,7 @@ enum LexError {
 fn lex_no_loc<'a>(
     text: &'static str,
 ) -> Result<Vec<OutStripped>, Vec<LexError>> {
-    super::parse(text).map(|out_v| {
+    super::lex(text).map(|out_v| {
         out_v
             .into_iter()
             .map(|out| match out {
@@ -319,7 +292,7 @@ fn dont_lex_line_comment() {
 
 #[test]
 fn star_slash_tricky() {
-    let s = r#"/**/ / */**/ * /"#;
+    let s = r#"/**/ / */**/ * / /// this is a comment"#;
 
     use super::Token::{Break, Slash, Star};
     use OutStripped::Token;
@@ -335,6 +308,8 @@ fn star_slash_tricky() {
     )
 }
 
+// I think both vanilla EA and ColorzCore will strip the comments from a
+// MESSAGE, so we should as well.
 #[test]
 fn message_with_comments() {
     let s = r#"MESSAGE this message /* contains */ // comments"#;
@@ -348,9 +323,21 @@ fn message_with_comments() {
     )
 }
 
+// Vanilla EA does not emit a newline here. It might be nice to add a lint
+// to this.
 #[test]
-fn edge_cases() {
-    // vanilla EA does not emit a newline here
-    let mid_line_block_comment = r#"A /*
+fn midline_multiline_comment() {
+    let s = r#"A /*
     */ B"#;
+
+    use super::Token::{Break, Ident};
+    use OutStripped::Token;
+    assert_eq!(
+        lex_no_loc(s),
+        Ok(vec![
+            Token(Ident("A".to_string())),
+            Token(Ident("B".to_string())),
+            Token(Break)
+        ])
+    )
 }

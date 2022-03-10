@@ -1,6 +1,9 @@
 // Lexing, directive parsing and MESSAGE
 
-use crate::types::hkt::{ConstW, VecW, Witness};
+use crate::{
+    lang::syntax::DirectiveArgs,
+    types::hkt::{ConstW, VecW, Witness},
+};
 
 use super::{
     Carrier, Directive, GenericParseErrorHandler, Location, Span, Token,
@@ -11,6 +14,23 @@ use chumsky::{error::Error as ChumskyError, prelude::*};
 
 #[cfg(test)]
 mod tests;
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum UnparsedDirective {}
+
+impl DirectiveArgs for UnparsedDirective {
+    type Define = String;
+    type Include = String;
+    type Incbin = String;
+    type Incext = String;
+    type Inctevent = String;
+    type IfDef = String;
+    type IfNDef = String;
+    type Else = String;
+    type Endif = String;
+    type Pool = String;
+    type Undef = String;
+}
 
 // This needs to be ['static] to make some of the recursive parsers work, and
 // is probably good practice anyways.
@@ -104,7 +124,7 @@ where
 // cleverer with our embedding (see [hkt.rs]).
 pub enum OutImpl<'a, F: Witness<WithLocation<'a, Token>>> {
     Token(F::This),
-    Directive(WithLocation<'a, Directive>),
+    Directive(WithLocation<'a, Directive<UnparsedDirective>>),
     Message(String),
 }
 
@@ -248,7 +268,7 @@ where
         just('\\')
             .or(just('/'))
             .or(just('"'))
-            .or(just('\n'))
+            .or(just('\n').to(' '))
             .or(just('b').to('\x08'))
             .or(just('f').to('\x0C'))
             .or(just('n').to('\n'))
@@ -308,6 +328,14 @@ where
             just(">").to(Token::RAngle),
         )),
     ))
+}
+
+fn directive<E>(
+) -> impl Parser<char, Directive<UnparsedDirective>, Error = Carrier<char, E>> + Clone
+where
+    E: LexErrorHandler,
+{
+    todo()
 }
 
 // This is roughly the "end of the line", but also includes [;].
@@ -371,8 +399,42 @@ where
             OutImpl::Token(tokens)
         });
 
+    // XXX: There is a known bug here in which this code doesn't work properly:
+    //
+    // ```
+    // MESSAGE there is a comment /*
+    // */ that breaks the line
+    // ```
+    //
+    // There are a few reasonable behaviors here:
+    //
+    // - The comment also escapes the line break, producing the message
+    //   "there is a comment that breaks the line" (with an optional newline).
+    //   I think this is how ColorzCore works, and is consistent with the way
+    //   text after the end of a multiline comment works in other situations.
+    //
+    // - The comment escapes the line break but is also included in the
+    //   message, giving "there is a comment /*[BRK]*/ that breaks the line".
+    //   This is consistent with how other types of comments work in [MESSAGE].
+    //
+    // - The comment ends the message, producing the message "there is a
+    //   comment", along with a syntax error at the unmatched comment ender.
+    //
+    // As written, this parser does neither, and instead produces the message
+    // "there is a comment /*", along with the syntax error.
+    //
+    // There are a few ways to adjust this parser to fix it. One way would be
+    // to define a "valid message step" parser that rejects both "//" and "/*",
+    // then somehow stripping everything relevant?
+    //
+    // Alternatively, we could bake in special-checking for the "/*" sequence,
+    // include that in the message, then either post process it (or not) later.
+    //
+    // Both approaches are pretty unwieldy and I don't want to spend all my
+    // time on comment edge cases that are unlikely to spring up in real code
+    // (famous last words).
     let message = just("MESSAGE")
-        .padded()
+        .padded_by(filter(move |c: &char| c.is_whitespace() && *c != '\n'))
         .ignore_then(
             just('\\')
                 .ignore_then(just('\n'))
@@ -383,7 +445,19 @@ where
         .map(OutImpl::Message)
         .then_ignore(just('\n').ignored());
 
+    let directive = directive().map_with_span(|value, span| {
+        OutImpl::Directive(WithLocation {
+            value,
+            loc: Location {
+                owner: None,
+                span: Some(span),
+                needed_by: None,
+            },
+        })
+    });
+
     message
+        .or(directive)
         .or(line)
         .padded_by(comment().repeated())
         .padded()
@@ -400,7 +474,7 @@ fn flatten<'a>(v: Vec<OutImpl<'a, VecW>>) -> Vec<Out<'a>> {
         .collect()
 }
 
-pub fn parse<'a, E>(s: impl AsRef<str>) -> Result<Vec<Out<'a>>, Vec<E>>
+pub fn lex<'a, E>(s: impl AsRef<str>) -> Result<Vec<Out<'a>>, Vec<E>>
 where
     E: LexErrorHandler,
 {
