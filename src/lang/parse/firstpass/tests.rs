@@ -5,7 +5,7 @@ use super::{super::GenericParseErrorHandler, *};
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum OutStripped {
     Token(Token),
-    Directive(Directive<UnparsedDirective>),
+    Directive(Directive<Unparsed>),
     Message(String),
 }
 
@@ -46,6 +46,7 @@ enum LexError {
     Unlabeled(Span, HashSet<Option<char>>, Option<char>),
     UnclosedComment,
     UnclosedString,
+    BadDirective,
 }
 
 fn lex_no_loc<'a>(
@@ -74,6 +75,10 @@ impl LexErrorHandler for LexError {
 
     fn unclosed_string_literal(_span: Span) -> Self {
         Self::UnclosedString
+    }
+
+    fn bad_directive(_span: Span) -> Self {
+        Self::BadDirective
     }
 }
 
@@ -140,8 +145,7 @@ fn block_comment_containing_line_comment() {
 
     let with_line = r#"/*
       // this line is commented */
-      */
-      "#;
+      */"#;
 
     assert_eq!(run_parser(block_comment.clone(), with_line), Ok(()));
 }
@@ -312,15 +316,32 @@ fn star_slash_tricky() {
 // MESSAGE, so we should as well.
 #[test]
 fn message_with_comments() {
-    let s = r#"MESSAGE this message /* contains */ // comments"#;
+    let s = r#"MESSAGE this message / /* contains */ // comments"#;
 
     use OutStripped::Message;
     assert_eq!(
         lex_no_loc(s),
-        Ok(vec![Message(
-            "this message /* contains */ // comments".to_string()
-        )])
+        Ok(vec![Message("this message /".to_string())])
     )
+}
+
+#[test]
+fn directive_with_comments() {
+    let s = r#"#define /* */ A /* */ "B C" // D"#;
+
+    use super::Directive::Define;
+    use OutStripped::Directive;
+    assert_eq!(
+        lex_no_loc(s),
+        Ok(vec![Directive(Define(r#"A  "B C""#.to_string()))])
+    )
+}
+
+#[test]
+fn bad_directive() {
+    let s = r#"#notreal"#;
+
+    assert_eq!(lex_no_loc(s), Err(vec![LexError::BadDirective]))
 }
 
 // Vanilla EA does not emit a newline here. It might be nice to add a lint
@@ -337,6 +358,68 @@ fn midline_multiline_comment() {
         Ok(vec![
             Token(Ident("A".to_string())),
             Token(Ident("B".to_string())),
+            Token(Break)
+        ])
+    )
+}
+
+#[test]
+fn realistic_test() {
+    let s = r#"#ifdef DRAGON_VEINS
+VeinEffect(0, FreezeAllEnemies)
+#endif // DRAGON_VEINS
+
+setText(0x160, NewChName)
+
+MESSAGE this example is a snippet from the FE8 Skill System
+
+ALIGN 4
+NewChName:
+String("Boss Rush")"#;
+
+    use super::{Directive::*, Token::*};
+    use OutStripped::{Directive, Message, Token};
+    assert_eq!(
+        lex_no_loc(s),
+        Ok(vec![
+            Directive(IfDef("DRAGON_VEINS".to_string())),
+            Token(Ident("VeinEffect".to_string())),
+            Token(LParen),
+            Token(Number {
+                payload: "0".to_string(),
+                radix: 10
+            }),
+            Token(Comma),
+            Token(Ident("FreezeAllEnemies".to_string())),
+            Token(RParen),
+            Token(Break),
+            Directive(Endif("".to_string())),
+            Token(Ident("setText".to_string())),
+            Token(LParen),
+            Token(Number {
+                payload: "160".to_string(),
+                radix: 16
+            }),
+            Token(Comma),
+            Token(Ident("NewChName".to_string())),
+            Token(RParen),
+            Token(Break),
+            Message(
+                "this example is a snippet from the FE8 Skill System"
+                    .to_string()
+            ),
+            Token(Ident("ALIGN".to_string())),
+            Token(Number {
+                payload: "4".to_string(),
+                radix: 10
+            }),
+            Token(Ident("NewChName".to_string())),
+            Token(Colon),
+            Token(Break),
+            Token(Ident("String".to_string())),
+            Token(LParen),
+            Token(QuotedString("Boss Rush".to_string())),
+            Token(RParen),
             Token(Break)
         ])
     )

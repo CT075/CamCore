@@ -1,7 +1,7 @@
 // Lexing, directive parsing and MESSAGE
 
 use crate::{
-    lang::syntax::DirectiveArgs,
+    lang::syntax::directive::Unparsed,
     types::hkt::{ConstW, VecW, Witness},
 };
 
@@ -15,35 +15,21 @@ use chumsky::{error::Error as ChumskyError, prelude::*};
 #[cfg(test)]
 mod tests;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum UnparsedDirective {}
-
-impl DirectiveArgs for UnparsedDirective {
-    type Define = String;
-    type Include = String;
-    type Incbin = String;
-    type Incext = String;
-    type Inctevent = String;
-    type IfDef = String;
-    type IfNDef = String;
-    type Else = String;
-    type Endif = String;
-    type Pool = String;
-    type Undef = String;
-}
-
 // This needs to be ['static] to make some of the recursive parsers work, and
 // is probably good practice anyways.
 pub trait LexErrorHandler: GenericParseErrorHandler<char> + 'static {
     fn unclosed_comment(span: Span) -> Self;
 
     fn unclosed_string_literal(span: Span) -> Self;
+
+    fn bad_directive(span: Span) -> Self;
 }
 
 #[derive(Copy, Clone)]
 pub enum LexKind {
     BlockComment,
     String,
+    Directive,
 }
 
 impl<E> ChumskyError<char> for Carrier<char, E>
@@ -105,6 +91,7 @@ where
         Carrier::Specific(match label {
             BlockComment => E::unclosed_comment(span),
             String => E::unclosed_string_literal(span),
+            Directive => E::bad_directive(span),
         })
     }
 }
@@ -124,7 +111,7 @@ where
 // cleverer with our embedding (see [hkt.rs]).
 pub enum OutImpl<'a, F: Witness<WithLocation<'a, Token>>> {
     Token(F::This),
-    Directive(WithLocation<'a, Directive<UnparsedDirective>>),
+    Directive(WithLocation<'a, Directive<Unparsed>>),
     Message(String),
 }
 
@@ -171,6 +158,14 @@ where
 
 pub type Out<'a> = OutImpl<'a, ConstW>;
 
+fn non_nl_whitespace<E>(
+) -> impl Parser<char, char, Error = Carrier<char, E>> + Clone
+where
+    E: LexErrorHandler,
+{
+    filter(move |c: &char| c.is_whitespace() && *c != '\n')
+}
+
 fn line_comment<E>() -> impl Parser<char, (), Error = Carrier<char, E>> + Clone
 where
     E: LexErrorHandler,
@@ -213,7 +208,6 @@ where
             .delimited_by(just("/*"), just("*/"))
     })
     .labelled(LexKind::BlockComment)
-    .padded()
     .ignored()
 }
 
@@ -222,7 +216,7 @@ where
     E: LexErrorHandler,
 {
     let line_comment = line_comment();
-    let block_comment = block_comment();
+    let block_comment = block_comment().padded();
 
     line_comment.or(block_comment)
 }
@@ -330,14 +324,6 @@ where
     ))
 }
 
-fn directive<E>(
-) -> impl Parser<char, Directive<UnparsedDirective>, Error = Carrier<char, E>> + Clone
-where
-    E: LexErrorHandler,
-{
-    todo()
-}
-
 // This is roughly the "end of the line", but also includes [;].
 //
 // TODO: Currently, in the following input, [A] and [B] are considered to be on
@@ -361,7 +347,89 @@ where
     E: LexErrorHandler,
 {
     choice((just('\n').ignored(), just(';').ignored(), line_comment()))
+        .padded_by(
+            filter(move |c: &char| c.is_whitespace() && *c != '\n')
+                .repeated()
+                .ignored(),
+        )
         .to(Token::Break)
+}
+
+fn rest_of_line<E>(
+) -> impl Parser<char, String, Error = Carrier<char, E>> + Clone
+where
+    E: LexErrorHandler,
+{
+    choice((
+        block_comment().to(None),
+        none_of("/\n").map(Some),
+        just('/').then_ignore(none_of("/*").rewind()).map(Some),
+    ))
+    .repeated()
+    .map(|cs| {
+        cs.into_iter()
+            .filter_map(|opt| opt)
+            .collect::<String>()
+            .trim()
+            .to_string()
+    })
+    .then_ignore(just('\n').ignored().or(line_comment()))
+}
+
+fn directive<E>(
+) -> impl Parser<char, Directive<Unparsed>, Error = Carrier<char, E>> + Clone
+where
+    E: LexErrorHandler,
+{
+    just('#').ignore_then(
+        choice((
+            just("define")
+                .then_ignore(non_nl_whitespace().repeated().at_least(1))
+                .ignore_then(rest_of_line())
+                .map(Directive::Define),
+            just("include")
+                .then_ignore(non_nl_whitespace().repeated().at_least(1))
+                .ignore_then(rest_of_line())
+                .map(Directive::Include),
+            just("incbin")
+                .then_ignore(non_nl_whitespace().repeated().at_least(1))
+                .ignore_then(rest_of_line())
+                .map(Directive::Incbin),
+            just("incext")
+                .then_ignore(non_nl_whitespace().repeated().at_least(1))
+                .ignore_then(rest_of_line())
+                .map(Directive::Incext),
+            just("inctevent")
+                .then_ignore(non_nl_whitespace().repeated().at_least(1))
+                .ignore_then(rest_of_line())
+                .map(Directive::Inctevent),
+            just("ifdef")
+                .then_ignore(non_nl_whitespace().repeated().at_least(1))
+                .ignore_then(rest_of_line())
+                .map(Directive::IfDef),
+            just("ifndef")
+                .then_ignore(non_nl_whitespace().repeated().at_least(1))
+                .ignore_then(rest_of_line())
+                .map(Directive::IfNDef),
+            just("else")
+                .then_ignore(non_nl_whitespace().repeated().at_least(1))
+                .ignore_then(rest_of_line())
+                .map(Directive::Else),
+            just("endif")
+                .then_ignore(non_nl_whitespace().repeated().at_least(1))
+                .ignore_then(rest_of_line())
+                .map(Directive::Endif),
+            just("pool")
+                .then_ignore(non_nl_whitespace().repeated().at_least(1))
+                .ignore_then(rest_of_line())
+                .map(Directive::Pool),
+            just("undef")
+                .then_ignore(non_nl_whitespace().repeated().at_least(1))
+                .ignore_then(rest_of_line())
+                .map(Directive::Undef),
+        ))
+        .labelled(LexKind::Directive),
+    )
 }
 
 fn parser<'a, E>(
@@ -399,51 +467,10 @@ where
             OutImpl::Token(tokens)
         });
 
-    // XXX: There is a known bug here in which this code doesn't work properly:
-    //
-    // ```
-    // MESSAGE there is a comment /*
-    // */ that breaks the line
-    // ```
-    //
-    // There are a few reasonable behaviors here:
-    //
-    // - The comment also escapes the line break, producing the message
-    //   "there is a comment that breaks the line" (with an optional newline).
-    //   I think this is how ColorzCore works, and is consistent with the way
-    //   text after the end of a multiline comment works in other situations.
-    //
-    // - The comment escapes the line break but is also included in the
-    //   message, giving "there is a comment /*[BRK]*/ that breaks the line".
-    //   This is consistent with how other types of comments work in [MESSAGE].
-    //
-    // - The comment ends the message, producing the message "there is a
-    //   comment", along with a syntax error at the unmatched comment ender.
-    //
-    // As written, this parser does neither, and instead produces the message
-    // "there is a comment /*", along with the syntax error.
-    //
-    // There are a few ways to adjust this parser to fix it. One way would be
-    // to define a "valid message step" parser that rejects both "//" and "/*",
-    // then somehow stripping everything relevant?
-    //
-    // Alternatively, we could bake in special-checking for the "/*" sequence,
-    // include that in the message, then either post process it (or not) later.
-    //
-    // Both approaches are pretty unwieldy and I don't want to spend all my
-    // time on comment edge cases that are unlikely to spring up in real code
-    // (famous last words).
     let message = just("MESSAGE")
-        .padded_by(filter(move |c: &char| c.is_whitespace() && *c != '\n'))
-        .ignore_then(
-            just('\\')
-                .ignore_then(just('\n'))
-                .or(filter(move |c: &char| *c != '\n'))
-                .repeated()
-                .collect::<String>(),
-        )
-        .map(OutImpl::Message)
-        .then_ignore(just('\n').ignored());
+        .padded_by(non_nl_whitespace().repeated())
+        .ignore_then(rest_of_line().padded())
+        .map(OutImpl::Message);
 
     let directive = directive().map_with_span(|value, span| {
         OutImpl::Directive(WithLocation {
@@ -486,6 +513,7 @@ where
     let s = s;
 
     parser()
+        .then_ignore(end())
         .parse(s)
         .map(flatten)
         .map_err(|errs| errs.into_iter().map(Carrier::into).collect())
