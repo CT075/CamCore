@@ -8,8 +8,9 @@ hacking community where possible. Otherwise, you may find it useful to look up
 how a basic compiler pipeline works before trying to read this document.
 
 We will consider the "front end" to be any part of the program dealing with the
-EA language itself -- language raws, parsing, preprocessing, and translation
-into hex.
+EA language itself -- language raws, parsing, preprocessing, and other
+interaction with the file system. We'll also consider "translating statements
+to binary" to be part of the front-end's job.
 
 The frontend's job is to take the project source (as a string, or more likely
 as a tuple of `(file_tree, entry_filepath)`) and output a list of `(offset,
@@ -18,28 +19,13 @@ overlap checks).
 
 The backend will handle translating these tuples into some other format. In the
 immediate case, this will be Writing The ROM, but it wouldn't be out of the
-question to plug in something else instead (DSA, merlinus???, etc).
+question to plug in something else instead (raw json, DSA, etc).
 
 # Frontend
 
-## Lexing
+Parsing is done in a few different passes, primarily using the
+[chumsky](https://github.com/zesterer/chumsky) parser combinator library.
 
-Lexing is currently done by hand in `src/lang/lex.rs`, which does nothing but
-tokenize the input using a similar process to [ColorzCore](https://github.com/FireEmblemUniverse/ColorzCore/blob/master/ColorzCore/Lexer/Tokenizer.cs).
-
-It is difficult to use a traditional lexer-generator for a few reasons, the
-biggest of which is that lexing is not context-free. Consider the following
-inputs:
-
-```
-#include a/b/c
-
-UNIT a/b/c
-```
-
-In the first case, we want to lex `a/b/c` as a single token (a filepath), but in
-the second, we want to lex it as five (the identifiers `a`,`b`,`c` separated by
-division tokens). There are a few ways around this, such as reconstructing the
-file path after lexing, but all of them (as far as I can tell) would require
-tracking whitespace (is `a b/c` a pair of expressions, or a single filepath
-with a parent of `a b`?), which is, in my view, a much greater evil.
+The first pass is effectively a lexer, splitting the source into directives,
+`MESSAGE`s (both of which are read verbatim-minus-comments), and more typical
+tokens representing individual textual units.
