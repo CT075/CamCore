@@ -1,14 +1,16 @@
 // Lexing, directive parsing and MESSAGE
 
+use std::rc::Rc;
+
 use crate::{
-    lang::syntax::directive::Unparsed,
-    types::hkt::{ConstW, VecW, Witness},
+    lang::syntax::{
+        directive::Unparsed, Location, Span, SpannedW, Token, WithLocation,
+        WithLocationW,
+    },
+    types::hkt::{IdentityW, VecW, Witness},
 };
 
-use super::{
-    Carrier, Directive, GenericParseErrorHandler, Location, Span, Token,
-    WithLocation,
-};
+use super::{Carrier, Directive, GenericParseErrorHandler};
 
 use chumsky::{error::Error as ChumskyError, prelude::*};
 
@@ -96,12 +98,22 @@ where
     }
 }
 
-// This is a trick known as "higher-kinded data", where we know that the
-// [Token] variant will always contain something that uses the [Token] type,
-// but want to be generic over the "shape" of that something. In this case,
-// it's more convenient to parse by lines, in which we'll want to use
-// [Vec<Token>]. However, we'd like the actual output of this phase to just be
-// a flat list of tokens, so that variant should just contain regular [Token].
+// This is a trick known as "higher-kinded data". The basic idea is that we
+// want this type to be polymorphic over the "shape" of some data contained
+// in a variant.
+//
+// In this particular case, there are two things we want to be polymorphic
+// over.
+//
+// - We want to use the same datatype regardless of whether the inner syntax
+//   is tagged with a span or a full location
+// - Because EA is a line-based language, it's convenient to produce tokens one
+//   line at a time as a sequence of [Vec<Token>]s. However, the next stage of
+//   parsing is much more convenient as a flat stream. More concretely, it's
+//   the difference between [Vec<Vec<Token>>] and [Vec<Token>].
+//
+// By using this seemingly more-complicated representation, we can ensure that
+// all three variants are location-tagged in the same way.
 //
 // You can read more about this approach here:
 //   https://reasonablypolymorphic.com/blog/higher-kinded-data/
@@ -109,16 +121,23 @@ where
 // It's a bit uglier than what you'd see in Haskell, since Rust doesn't support
 // higher kinded types as a first-class construct, so we have to get a bit
 // cleverer with our embedding (see [hkt.rs]).
-pub enum OutImpl<'a, F: Witness<WithLocation<'a, Token>>> {
+pub enum OutImpl<
+    L: Witness<Token> + Witness<Directive<Unparsed>> + Witness<String>,
+    F: Witness<<L as Witness<Token>>::This>,
+> {
     Token(F::This),
-    Directive(WithLocation<'a, Directive<Unparsed>>),
-    Message(String),
+    Directive(<L as Witness<Directive<Unparsed>>>::This),
+    Message(<L as Witness<String>>::This),
 }
 
-impl<'a, F> std::fmt::Debug for OutImpl<'a, F>
+impl<L, F> std::fmt::Debug for OutImpl<L, F>
 where
-    F: Witness<WithLocation<'a, Token>>,
+    L: Witness<Token> + Witness<Directive<Unparsed>> + Witness<String>,
+    F: Witness<<L as Witness<Token>>::This>,
     F::This: std::fmt::Debug,
+    <L as Witness<Token>>::This: std::fmt::Debug,
+    <L as Witness<Directive<Unparsed>>>::This: std::fmt::Debug,
+    <L as Witness<String>>::This: std::fmt::Debug,
 {
     fn fmt(
         &self,
@@ -134,10 +153,14 @@ where
     }
 }
 
-impl<'a, F> PartialEq for OutImpl<'a, F>
+impl<L, F> PartialEq for OutImpl<L, F>
 where
-    F: Witness<WithLocation<'a, Token>>,
+    L: Witness<Token> + Witness<Directive<Unparsed>> + Witness<String>,
+    F: Witness<<L as Witness<Token>>::This>,
     F::This: Eq,
+    <L as Witness<Token>>::This: Eq,
+    <L as Witness<Directive<Unparsed>>>::This: Eq,
+    <L as Witness<String>>::This: Eq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -149,14 +172,18 @@ where
     }
 }
 
-impl<'a, F> Eq for OutImpl<'a, F>
+impl<L, F> Eq for OutImpl<L, F>
 where
-    F: Witness<WithLocation<'a, Token>>,
+    L: Witness<Token> + Witness<Directive<Unparsed>> + Witness<String>,
+    F: Witness<<L as Witness<Token>>::This>,
     F::This: Eq,
+    <L as Witness<Token>>::This: Eq,
+    <L as Witness<Directive<Unparsed>>>::This: Eq,
+    <L as Witness<String>>::This: Eq,
 {
 }
 
-pub type Out<'a> = OutImpl<'a, ConstW>;
+pub type Out = OutImpl<WithLocationW, IdentityW>;
 
 fn non_nl_whitespace<E>(
 ) -> impl Parser<char, char, Error = Carrier<char, E>> + Clone
@@ -184,11 +211,14 @@ where
 // the one that fails, meaning that we can't rely on [labelled] to tag the
 // correct parser.
 //
-// Instead, we need to unroll the recursion one step, then somehow have the
+// My first thought was to unroll the recursion one step, then somehow have the
 // inner parser produce a result that tells whether any nested block comments
 // were encountered, then use that result to produce a label. I wasn't able to
 // get any initial attempts at this to work, and I think it's a niche enough
 // problem that it's not worth spending more time on.
+//
+// After gaining more experience with the library, I think there's probably a
+// way to do this using the [nested_delimiters] recovery strategy.
 fn block_comment<E>() -> impl Parser<char, (), Error = Carrier<char, E>> + Clone
 where
     E: LexErrorHandler,
@@ -376,8 +406,10 @@ where
     .then_ignore(just('\n').ignored().or(line_comment()))
 }
 
+// For the sake of future error reporting, when we mark the span of this line,
+// we mark the actual text of the directive, not counting the start.
 fn directive<E>(
-) -> impl Parser<char, Directive<Unparsed>, Error = Carrier<char, E>> + Clone
+) -> impl Parser<char, (Directive<Unparsed>, Span), Error = Carrier<char, E>> + Clone
 where
     E: LexErrorHandler,
 {
@@ -386,66 +418,59 @@ where
             just("define")
                 .then_ignore(non_nl_whitespace().repeated().at_least(1))
                 .ignore_then(rest_of_line())
-                .map(Directive::Define),
+                .map_with_span(|line, span| (Directive::Define(line), span)),
             just("include")
                 .then_ignore(non_nl_whitespace().repeated().at_least(1))
                 .ignore_then(rest_of_line())
-                .map(Directive::Include),
+                .map_with_span(|line, span| (Directive::Include(line), span)),
             just("incbin")
                 .then_ignore(non_nl_whitespace().repeated().at_least(1))
                 .ignore_then(rest_of_line())
-                .map(Directive::Incbin),
+                .map_with_span(|line, span| (Directive::Incbin(line), span)),
             just("incext")
                 .then_ignore(non_nl_whitespace().repeated().at_least(1))
                 .ignore_then(rest_of_line())
-                .map(Directive::Incext),
+                .map_with_span(|line, span| (Directive::Incext(line), span)),
             just("inctevent")
                 .then_ignore(non_nl_whitespace().repeated().at_least(1))
                 .ignore_then(rest_of_line())
-                .map(Directive::Inctevent),
+                .map_with_span(|line, span| (Directive::Inctevent(line), span)),
             just("ifdef")
                 .then_ignore(non_nl_whitespace().repeated().at_least(1))
                 .ignore_then(rest_of_line())
-                .map(Directive::IfDef),
+                .map_with_span(|line, span| (Directive::IfDef(line), span)),
             just("ifndef")
                 .then_ignore(non_nl_whitespace().repeated().at_least(1))
                 .ignore_then(rest_of_line())
-                .map(Directive::IfNDef),
+                .map_with_span(|line, span| (Directive::IfNDef(line), span)),
             just("else")
                 .then_ignore(non_nl_whitespace().repeated().at_least(1))
                 .ignore_then(rest_of_line())
-                .map(Directive::Else),
+                .map_with_span(|line, span| (Directive::Else(line), span)),
             just("endif")
                 .then_ignore(non_nl_whitespace().repeated().at_least(1))
                 .ignore_then(rest_of_line())
-                .map(Directive::Endif),
+                .map_with_span(|line, span| (Directive::Endif(line), span)),
             just("pool")
                 .then_ignore(non_nl_whitespace().repeated().at_least(1))
                 .ignore_then(rest_of_line())
-                .map(Directive::Pool),
+                .map_with_span(|line, span| (Directive::Pool(line), span)),
             just("undef")
                 .then_ignore(non_nl_whitespace().repeated().at_least(1))
                 .ignore_then(rest_of_line())
-                .map(Directive::Undef),
+                .map_with_span(|line, span| (Directive::Undef(line), span)),
         ))
         .labelled(LexKind::Directive),
     )
 }
 
-fn parser<'a, E>(
-) -> impl Parser<char, Vec<OutImpl<'a, VecW>>, Error = Carrier<char, E>>
+fn parser<E>(
+) -> impl Parser<char, Vec<OutImpl<SpannedW, VecW>>, Error = Carrier<char, E>>
 where
     E: LexErrorHandler,
 {
     let line = token()
-        .map_with_span(|value, span| WithLocation {
-            value,
-            loc: Location {
-                owner: None,
-                span: Some(span),
-                needed_by: None,
-            },
-        })
+        .map_with_span(|v, span| (v, span))
         .padded_by(
             block_comment()
                 .or(just('\\').ignore_then(just('\n')).ignored())
@@ -454,14 +479,7 @@ where
                 .repeated(),
         )
         .repeated()
-        .then(statement_break().map_with_span(|value, span| WithLocation {
-            value,
-            loc: Location {
-                owner: None,
-                span: Some(span),
-                needed_by: None,
-            },
-        }))
+        .then(statement_break().map_with_span(|v, span| (v, span)))
         .map(|(mut tokens, brk)| {
             tokens.push(brk);
             OutImpl::Token(tokens)
@@ -469,19 +487,10 @@ where
 
     let message = just("MESSAGE")
         .padded_by(non_nl_whitespace().repeated())
-        .ignore_then(rest_of_line().padded())
+        .ignore_then(rest_of_line().map_with_span(|v, span| (v, span)))
         .map(OutImpl::Message);
 
-    let directive = directive().map_with_span(|value, span| {
-        OutImpl::Directive(WithLocation {
-            value,
-            loc: Location {
-                owner: None,
-                span: Some(span),
-                needed_by: None,
-            },
-        })
-    });
+    let directive = directive().map(OutImpl::Directive).padded();
 
     message
         .or(directive)
@@ -491,17 +500,63 @@ where
         .repeated()
 }
 
-fn flatten<'a>(v: Vec<OutImpl<'a, VecW>>) -> Vec<Out<'a>> {
+fn annot_with<T>(
+    owner: Option<Rc<str>>,
+    needed_by: Option<Rc<Location>>,
+    (value, span): (T, Span),
+    f: impl Fn(WithLocation<T>) -> Out,
+) -> Out {
+    f(WithLocation {
+        value,
+        loc: Location {
+            span: Some(span),
+            owner: owner.clone(),
+            needed_by: needed_by.clone(),
+        },
+    })
+}
+
+fn flatten_and_annot(
+    v: Vec<OutImpl<SpannedW, VecW>>,
+    owner: Option<Rc<str>>,
+    needed_by: Option<Rc<Location>>,
+) -> Vec<Out> {
     v.into_iter()
         .flat_map(|item| match item {
-            OutImpl::Token(toks) => toks.into_iter().map(Out::Token).collect(),
-            OutImpl::Directive(d) => vec![Out::Directive(d)],
-            OutImpl::Message(msg) => vec![Out::Message(msg)],
+            OutImpl::Token(toks) => toks
+                .into_iter()
+                .map(|tok| {
+                    annot_with(
+                        owner.clone(),
+                        needed_by.clone(),
+                        tok,
+                        Out::Token,
+                    )
+                })
+                .collect(),
+            OutImpl::Directive(d) => {
+                vec![annot_with(
+                    owner.clone(),
+                    needed_by.clone(),
+                    d,
+                    Out::Directive,
+                )]
+            }
+            OutImpl::Message(msg) => vec![annot_with(
+                owner.clone(),
+                needed_by.clone(),
+                msg,
+                Out::Message,
+            )],
         })
         .collect()
 }
 
-pub fn lex<'a, E>(s: impl AsRef<str>) -> Result<Vec<Out<'a>>, Vec<E>>
+pub fn lex<E>(
+    s: impl AsRef<str>,
+    owner: Option<Rc<str>>,
+    needed_by: Option<Rc<Location>>,
+) -> Result<Vec<Out>, Vec<E>>
 where
     E: LexErrorHandler,
 {
@@ -515,6 +570,6 @@ where
     parser()
         .then_ignore(end())
         .parse(s)
-        .map(flatten)
+        .map(|v| flatten_and_annot(v, owner, needed_by))
         .map_err(|errs| errs.into_iter().map(Carrier::into).collect())
 }

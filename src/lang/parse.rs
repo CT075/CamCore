@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use super::syntax::{Directive, Location, Span, Token, WithLocation};
 
-pub mod firstpass;
+pub mod lexer;
+pub mod secondpass;
 
 #[derive(Debug)]
 pub enum Carrier<I, E> {

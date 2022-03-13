@@ -1,74 +1,50 @@
-use std::ops::Range;
+use std::{ops::Range, rc::Rc};
+
+use crate::types::hkt::Witness;
 
 pub type Span = Range<usize>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Location<'a> {
+pub struct Location {
     pub span: Option<Span>,
-    pub owner: Option<&'a str>,
-    pub needed_by: Option<Box<Location<'a>>>,
+    pub owner: Option<Rc<str>>,
+    pub needed_by: Option<Rc<Location>>,
+}
+
+pub type Spanned<T> = (T, Span);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpannedW {}
+
+impl<T> Witness<T> for SpannedW {
+    type This = Spanned<T>;
+
+    fn absurd(self) -> std::convert::Infallible {
+        match self {}
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WithLocation<'a, T> {
+pub struct WithLocation<T> {
     pub value: T,
-    pub loc: Location<'a>,
-}
-
-pub mod directive {
-    // The point of this trait is to allow us to use the same [Directive] enum
-    // with both parsed and unparsed arguments. In practice, implementors of this
-    // trait will have all types as [String] (unparsed), structured data with
-    // string/vars interpolated (parsed and unexpanded), or structured data with
-    // just strings (parsed and expanded).
-    pub trait Args {
-        type Define: std::fmt::Debug + PartialEq + Eq + Clone;
-        type Include: std::fmt::Debug + PartialEq + Eq + Clone;
-        type Incbin: std::fmt::Debug + PartialEq + Eq + Clone;
-        type Incext: std::fmt::Debug + PartialEq + Eq + Clone;
-        type Inctevent: std::fmt::Debug + PartialEq + Eq + Clone;
-        type IfDef: std::fmt::Debug + PartialEq + Eq + Clone;
-        type IfNDef: std::fmt::Debug + PartialEq + Eq + Clone;
-        type Else: std::fmt::Debug + PartialEq + Eq + Clone;
-        type Endif: std::fmt::Debug + PartialEq + Eq + Clone;
-        type Pool: std::fmt::Debug + PartialEq + Eq + Clone;
-        type Undef: std::fmt::Debug + PartialEq + Eq + Clone;
-    }
-
-    #[derive(Debug, PartialEq, Eq, Clone)]
-    pub enum Unparsed {}
-
-    impl Args for Unparsed {
-        type Define = String;
-        type Include = String;
-        type Incbin = String;
-        type Incext = String;
-        type Inctevent = String;
-        type IfDef = String;
-        type IfNDef = String;
-        type Else = String;
-        type Endif = String;
-        type Pool = String;
-        type Undef = String;
-    }
+    pub loc: Location,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Directive<Args: directive::Args> {
-    Define(Args::Define),
-    Include(Args::Include),
-    Incbin(Args::Incbin),
-    Incext(Args::Incext),
-    Inctevent(Args::Inctevent),
-    IfDef(Args::IfDef),
-    IfNDef(Args::IfNDef),
-    Else(Args::Else),
-    Endif(Args::Endif),
-    Pool(Args::Pool),
-    Undef(Args::Undef),
+pub enum WithLocationW {}
+
+impl<T> Witness<T> for WithLocationW {
+    type This = WithLocation<T>;
+
+    fn absurd(self) -> std::convert::Infallible {
+        match self {}
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+pub mod directive;
+pub use directive::Directive;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Token {
     Ident(String),
     Number { payload: String, radix: usize },

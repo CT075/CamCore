@@ -1,13 +1,5 @@
 pub mod generic;
 pub mod hkt;
 
-pub enum Void {}
-
-#[derive(Eq, PartialEq, Debug)]
-pub struct Identifier(pub String);
-impl Identifier {
-    pub fn to_string(self) -> String {
-        let Identifier(s) = self;
-        s
-    }
-}
+mod string_with_vars;
+pub use string_with_vars::S as StringWithVars;
