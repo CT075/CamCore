@@ -1,11 +1,19 @@
 use std::collections::HashMap;
 
-use crate::lang::syntax::Span;
+use crate::lang::syntax::{restrict_span, Span};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Element {
     Text(String),
     Var(String),
+}
+
+pub fn text(s: String) -> Element {
+    Element::Text(s)
+}
+
+pub fn var(s: String) -> Element {
+    Element::Var(s)
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -61,10 +69,16 @@ impl S {
     }
 }
 
+impl From<Vec<Element>> for S {
+    fn from(v: Vec<Element>) -> Self {
+        S(v)
+    }
+}
+
 mod parser {
     use chumsky::{error::Simple, prelude::*};
 
-    use super::{Element, Span};
+    use super::{restrict_span, Element, Span};
 
     pub trait ParseErrorHandler {
         fn bad_post_percent(span: Span) -> Self;
@@ -99,16 +113,27 @@ mod parser {
     }
 
     impl super::S {
-        pub fn parse<E>(s: impl AsRef<str>) -> Result<Self, Vec<E>>
+        pub fn parse<E>(
+            s: impl AsRef<str>,
+            outer_span: Option<&Span>,
+        ) -> Result<Self, Vec<E>>
         where
             E: ParseErrorHandler,
         {
+            let outer = outer_span.unwrap_or(&Span { start: 0, end: 0 });
+
             parser().then_ignore(end()).parse(s.as_ref()).map_err(|v| {
                 v.into_iter()
                     .map(|e| match e.label() {
-                        Some("start") => E::bad_post_percent(e.span()),
-                        Some("ident") => E::bad_identifier(e.span()),
-                        Some("end") => E::unclosed_var(e.span()),
+                        Some("start") => {
+                            E::bad_post_percent(restrict_span(outer, &e.span()))
+                        }
+                        Some("ident") => {
+                            E::bad_identifier(restrict_span(outer, &e.span()))
+                        }
+                        Some("end") => {
+                            E::unclosed_var(restrict_span(outer, &e.span()))
+                        }
                         Some(_) | None => panic!(
                             "bug: template parsing produced unlabelled error"
                         ),
@@ -153,18 +178,22 @@ mod tests {
         }
     }
 
+    fn parse(s: &'static str) -> Result<super::S, Vec<E>> {
+        S::parse(s, None)
+    }
+
     #[test]
     fn parse_basic() {
-        let s = r#"this is some text with a %{var} or two"#;
+        let s = r#"this is some text with a %{var} or two, and some %%{text}"#;
 
-        let result: Result<_, Vec<E>> = S::parse(s);
+        let result: Result<_, Vec<E>> = parse(s);
 
         assert_eq!(
             result,
             Ok(super::S(vec![
                 Element::Text("this is some text with a ".to_string()),
                 Element::Var("var".to_string()),
-                Element::Text(" or two".to_string())
+                Element::Text(" or two, and some %{text}".to_string())
             ]))
         )
     }
@@ -173,7 +202,7 @@ mod tests {
     fn error_bad_percent() {
         let s = r#"%a"#;
 
-        let result: Result<_, Vec<E>> = S::parse(s);
+        let result: Result<_, Vec<E>> = parse(s);
 
         assert_eq!(result, Err(vec![E::BadPostPercent]))
     }
@@ -182,7 +211,7 @@ mod tests {
     fn error_bad_ident() {
         let s = r#"%{not an identifier}"#;
 
-        let result: Result<_, Vec<E>> = S::parse(s);
+        let result: Result<_, Vec<E>> = parse(s);
 
         assert_eq!(result, Err(vec![E::BadIdentifier]))
     }
@@ -191,7 +220,7 @@ mod tests {
     fn error_unclosed() {
         let s = r#"%{"#;
 
-        let result: Result<_, Vec<E>> = S::parse(s);
+        let result: Result<_, Vec<E>> = parse(s);
 
         assert_eq!(result, Err(vec![E::UnclosedVar]))
     }
@@ -200,7 +229,7 @@ mod tests {
     fn render_basic() -> Result<(), Vec<E>> {
         let s = r#"hello, %{world}!"#;
 
-        let s = S::parse(s)?;
+        let s = parse(s)?;
 
         let result = s.render(
             &vec![("world".to_string(), "world".to_string())]

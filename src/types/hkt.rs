@@ -23,13 +23,8 @@
 
 pub trait Witness<A>: Sized {
     // We can work around the unsafety required by the OCaml embedding because
-    // Rust has type familes
+    // Rust has associated types, which is sufficient.
     type This;
-
-    // This is to enforce that the witness is phantom-only. This isn't
-    // foolproof; you can also easily use [panic!()] or an infinite loop, but
-    // the idea is the same.
-    fn absurd(self) -> std::convert::Infallible;
 }
 
 pub struct Apply<F: Witness<A>, A> {
@@ -40,11 +35,11 @@ impl<F, A> Apply<F, A>
 where
     F: Witness<A>,
 {
-    fn inj(this: F::This) -> Self {
+    pub fn inj(this: F::This) -> Self {
         Apply { prj: this }
     }
 
-    fn prj(self) -> F::This {
+    pub fn prj(self) -> F::This {
         self.prj
     }
 }
@@ -52,37 +47,65 @@ where
 pub enum IdentityW {}
 impl<A> Witness<A> for IdentityW {
     type This = A;
-
-    fn absurd(self) -> std::convert::Infallible {
-        match self {}
-    }
 }
 
 pub enum OptionW {}
 impl<A> Witness<A> for OptionW {
     type This = Option<A>;
-
-    fn absurd(self) -> std::convert::Infallible {
-        match self {}
-    }
 }
 
 pub enum VecW {}
 impl<A> Witness<A> for VecW {
     type This = Vec<A>;
-
-    fn absurd(self) -> std::convert::Infallible {
-        match self {}
-    }
 }
 
 pub enum VoidW {}
 impl<A> Witness<A> for VoidW {
     type This = std::convert::Infallible;
+}
 
-    fn absurd(self) -> std::convert::Infallible {
-        match self {}
+// For some reason, if we try to inline this function to the definition of
+// [fmap] in [Functor], it can't unify
+//
+//   <VoidW as Witness<A>> == Infallible
+// and
+//   Infallible = <VoidW as Witness<B>>
+//
+// but if we write the function here, it works.
+impl VoidW {
+    fn transform<A, B>(
+        x: <Self as Witness<A>>::This,
+    ) -> <Self as Witness<B>>::This {
+        x
     }
+}
+
+pub struct ConstW<T> {
+    phantom: std::marker::PhantomData<T>,
+}
+
+impl<T, A> Witness<A> for ConstW<T> {
+    type This = T;
+}
+
+impl<T> ConstW<T> {
+    fn transform<A, B>(
+        x: <Self as Witness<A>>::This,
+    ) -> <Self as Witness<B>>::This {
+        x
+    }
+}
+
+pub struct ComposeW<F, G> {
+    phantom: std::marker::PhantomData<(F, G)>,
+}
+
+impl<F, G, A> Witness<A> for ComposeW<F, G>
+where
+    F: Witness<A>,
+    G: Witness<F::This>,
+{
+    type This = G::This;
 }
 
 pub trait Functor {
@@ -120,11 +143,21 @@ impl Functor for VecW {
 }
 
 impl Functor for VoidW {
-    fn fmap<A, B, F>(_this: Apply<Self, A>, _: F) -> Apply<Self, B>
+    fn fmap<A, B, F>(this: Apply<Self, A>, _: F) -> Apply<Self, B>
     where
         Self: Witness<A> + Witness<B>,
         F: Fn(A) -> B,
     {
-        panic!("fmap::<VoidW>: somehow had value of type [Apply<VoidW, A>]")
+        Apply::inj(Self::transform::<A, B>(this.prj()))
+    }
+}
+
+impl<T> Functor for ConstW<T> {
+    fn fmap<A, B, F>(this: Apply<Self, A>, _: F) -> Apply<Self, B>
+    where
+        Self: Witness<A> + Witness<B>,
+        F: Fn(A) -> B,
+    {
+        Apply::inj(Self::transform::<A, B>(this.prj()))
     }
 }

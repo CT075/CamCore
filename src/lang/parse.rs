@@ -1,9 +1,21 @@
+// XXX: The overall module (as in, [parse], not just this file) goes through a
+// bunch of different techniques to do the same thing. The biggest example is
+// the use of [Carrier] vs [chumsky::error::Simple] vs defining a bespoke
+// wrapper when parsing. This is primarily due to an anti-yak-shaving measure
+// I imposed on myself when initially writing this code, to ensure that I'd
+// actually eventually finish it, which was to "don't go back and change
+// already-written code to use better infrastructure unless it's the only path
+// forwards". There are several scattered comments in subfolders (marked with
+// [XXX]) describing places where the techniques could be improved, which may
+// be good low-hanging fruit for any future improvements.
+
 use std::collections::HashSet;
 
-use super::syntax::{Directive, Location, Span, Token, WithLocation};
+use super::syntax::{Directive, Span};
 
+mod directive;
 pub mod lexer;
-pub mod secondpass;
+pub mod preprocess;
 
 #[derive(Debug)]
 pub enum Carrier<I, E> {
@@ -22,7 +34,7 @@ pub enum Carrier<I, E> {
     Specific(E),
 }
 
-pub trait GenericParseErrorHandler<I> {
+pub trait GenericParseErrorHandler<I: std::hash::Hash + Eq>: Sized {
     fn expected(
         span: Span,
         expected: HashSet<Option<I>>,
@@ -34,7 +46,10 @@ pub trait GenericParseErrorHandler<I> {
         unclosed: I,
         expected: I,
         found: Option<I>,
-    ) -> Self;
+    ) -> Self {
+        let _ = unclosed;
+        Self::expected(span, vec![Some(expected)].into_iter().collect(), found)
+    }
 }
 
 impl<I, E> Carrier<I, E>

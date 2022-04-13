@@ -52,19 +52,13 @@ enum LexError {
 fn lex_no_loc<'a>(
     text: &'static str,
 ) -> Result<Vec<OutStripped>, Vec<LexError>> {
-    super::lex(text, None, None).map(|out_v| {
+    super::lex(text).map(|out_v| {
         out_v
             .into_iter()
             .map(|out| match out {
-                Out::Token(WithLocation { value, .. }) => {
-                    OutStripped::Token(value)
-                }
-                Out::Directive(WithLocation { value, .. }) => {
-                    OutStripped::Directive(value)
-                }
-                Out::Message(WithLocation { value, .. }) => {
-                    OutStripped::Message(value)
-                }
+                Out::Token((value, _)) => OutStripped::Token(value),
+                Out::Directive((value, _)) => OutStripped::Directive(value),
+                Out::Message((value, _)) => OutStripped::Message(value),
             })
             .collect()
     })
@@ -344,6 +338,21 @@ fn bad_directive() {
     let s = r#"#notreal"#;
 
     assert_eq!(lex_no_loc(s), Err(vec![LexError::BadDirective]))
+}
+
+#[test]
+fn escaped_eol_directive() {
+    let s = r#"#include \
+some text on a new line"#;
+
+    use super::Directive::*;
+    use OutStripped::Directive;
+    assert_eq!(
+        lex_no_loc(s),
+        Ok(vec![Directive(Include(
+            "some text on a new line".to_string()
+        )),])
+    )
 }
 
 // Vanilla EA does not emit a newline here. It might be nice to add a lint

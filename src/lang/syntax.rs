@@ -1,12 +1,15 @@
 use std::{ops::Range, rc::Rc};
 
-use crate::types::hkt::Witness;
+use crate::types::hkt::{Apply, Functor, Witness};
 
 pub type Span = Range<usize>;
 
+pub fn restrict_span(outer: &Span, inner: &Span) -> Span {
+    outer.start + inner.start..outer.start + inner.end
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Location {
-    pub span: Option<Span>,
     pub owner: Option<Rc<str>>,
     pub needed_by: Option<Rc<Location>>,
 }
@@ -18,26 +21,34 @@ pub enum SpannedW {}
 
 impl<T> Witness<T> for SpannedW {
     type This = Spanned<T>;
+}
 
-    fn absurd(self) -> std::convert::Infallible {
-        match self {}
+impl Functor for SpannedW {
+    fn fmap<A, B, F>(this: Apply<Self, A>, f: F) -> Apply<Self, B>
+    where
+        F: Fn(A) -> B,
+    {
+        let (x, span) = this.prj();
+        Apply::inj((f(x), span))
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WithLocation<T> {
-    pub value: T,
-    pub loc: Location,
-}
+pub type WithLocation<T> = (T, Location);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WithLocationW {}
 
 impl<T> Witness<T> for WithLocationW {
     type This = WithLocation<T>;
+}
 
-    fn absurd(self) -> std::convert::Infallible {
-        match self {}
+impl Functor for WithLocationW {
+    fn fmap<A, B, F>(this: Apply<Self, A>, f: F) -> Apply<Self, B>
+    where
+        F: Fn(A) -> B,
+    {
+        let (x, loc) = this.prj();
+        Apply::inj((f(x), loc))
     }
 }
 

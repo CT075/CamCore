@@ -1,12 +1,12 @@
-// Lexing, directive parsing and MESSAGE
+// Lexing, basic directive disambiguation and MESSAGE
 
-use std::rc::Rc;
+// TODO: The whole use of [Carrier], [LexKind], etc, could probably be
+// simplified a lot with judicious use of [try_map]. This whole module was
+// written before I had much experience with chumsky, so there's probably all
+// sorts of low-hanging simplifications here.
 
 use crate::{
-    lang::syntax::{
-        directive::Unparsed, Location, Span, SpannedW, Token, WithLocation,
-        WithLocationW,
-    },
+    lang::syntax::{directive, directive::Unparsed, Span, SpannedW, Token},
     types::hkt::{IdentityW, VecW, Witness},
 };
 
@@ -106,7 +106,8 @@ where
 // over.
 //
 // - We want to use the same datatype regardless of whether the inner syntax
-//   is tagged with a span or a full location
+//   is tagged with just a span (like after lexing a macro definition) or a
+//   full location (for regular parsing).
 // - Because EA is a line-based language, it's convenient to produce tokens one
 //   line at a time as a sequence of [Vec<Token>]s. However, the next stage of
 //   parsing is much more convenient as a flat stream. More concretely, it's
@@ -122,21 +123,23 @@ where
 // higher kinded types as a first-class construct, so we have to get a bit
 // cleverer with our embedding (see [hkt.rs]).
 pub enum OutImpl<
-    L: Witness<Token> + Witness<Directive<Unparsed>> + Witness<String>,
+    D: directive::Args,
+    L: Witness<Token> + Witness<Directive<D>> + Witness<String>,
     F: Witness<<L as Witness<Token>>::This>,
 > {
     Token(F::This),
-    Directive(<L as Witness<Directive<Unparsed>>>::This),
+    Directive(<L as Witness<Directive<D>>>::This),
     Message(<L as Witness<String>>::This),
 }
 
-impl<L, F> std::fmt::Debug for OutImpl<L, F>
+impl<D, L, F> std::fmt::Debug for OutImpl<D, L, F>
 where
-    L: Witness<Token> + Witness<Directive<Unparsed>> + Witness<String>,
+    D: directive::Args,
+    L: Witness<Token> + Witness<Directive<D>> + Witness<String>,
     F: Witness<<L as Witness<Token>>::This>,
     F::This: std::fmt::Debug,
     <L as Witness<Token>>::This: std::fmt::Debug,
-    <L as Witness<Directive<Unparsed>>>::This: std::fmt::Debug,
+    <L as Witness<Directive<D>>>::This: std::fmt::Debug,
     <L as Witness<String>>::This: std::fmt::Debug,
 {
     fn fmt(
@@ -153,13 +156,14 @@ where
     }
 }
 
-impl<L, F> PartialEq for OutImpl<L, F>
+impl<D, L, F> PartialEq for OutImpl<D, L, F>
 where
-    L: Witness<Token> + Witness<Directive<Unparsed>> + Witness<String>,
+    D: directive::Args,
+    L: Witness<Token> + Witness<Directive<D>> + Witness<String>,
     F: Witness<<L as Witness<Token>>::This>,
     F::This: Eq,
     <L as Witness<Token>>::This: Eq,
-    <L as Witness<Directive<Unparsed>>>::This: Eq,
+    <L as Witness<Directive<D>>>::This: Eq,
     <L as Witness<String>>::This: Eq,
 {
     fn eq(&self, other: &Self) -> bool {
@@ -172,18 +176,19 @@ where
     }
 }
 
-impl<L, F> Eq for OutImpl<L, F>
+impl<D, L, F> Eq for OutImpl<D, L, F>
 where
-    L: Witness<Token> + Witness<Directive<Unparsed>> + Witness<String>,
+    D: directive::Args,
+    L: Witness<Token> + Witness<Directive<D>> + Witness<String>,
     F: Witness<<L as Witness<Token>>::This>,
     F::This: Eq,
     <L as Witness<Token>>::This: Eq,
-    <L as Witness<Directive<Unparsed>>>::This: Eq,
+    <L as Witness<Directive<D>>>::This: Eq,
     <L as Witness<String>>::This: Eq,
 {
 }
 
-pub type Out = OutImpl<WithLocationW, IdentityW>;
+pub type Out = OutImpl<Unparsed, SpannedW, IdentityW>;
 
 fn non_nl_whitespace<E>(
 ) -> impl Parser<char, char, Error = Carrier<char, E>> + Clone
@@ -311,7 +316,7 @@ where
         .labelled(LexKind::String)
 }
 
-fn token<E>() -> impl Parser<char, Token, Error = Carrier<char, E>>
+pub fn token<E>() -> impl Parser<char, Token, Error = Carrier<char, E>>
 where
     E: LexErrorHandler,
 {
@@ -356,6 +361,9 @@ where
 
 // This is roughly the "end of the line", but also includes [;].
 //
+// TODO: This is too complicated. We should just parse [;] in [token], and just
+// make the overall lexer something like [line().padded_by(just('\n'))].
+//
 // TODO: Currently, in the following input, [A] and [B] are considered to be on
 // "the same line".
 //
@@ -392,8 +400,10 @@ where
 {
     choice((
         block_comment().to(None),
-        none_of("/\n").map(Some),
+        none_of("\\/\n").map(Some),
         just('/').then_ignore(none_of("/*").rewind()).map(Some),
+        just('\\').then_ignore(just('\n')).map(|_| Some(' ')),
+        just('\\').map(Some),
     ))
     .repeated()
     .map(|cs| {
@@ -408,6 +418,20 @@ where
 
 // For the sake of future error reporting, when we mark the span of this line,
 // we mark the actual text of the directive, not counting the start.
+//
+// TODO: This is bugged. Consider:
+//
+//   #incext "program.exe // the slashes are an argument"
+//
+// This will get parsed as
+//
+//   Incext("\"program.exe ")
+//
+// without correctly catching the slashes. There's a similar issue with block
+// comments in the string.
+//
+// That said, if you code like this, I hate you anyway and you deserve the
+// errors.
 fn directive<E>(
 ) -> impl Parser<char, (Directive<Unparsed>, Span), Error = Carrier<char, E>> + Clone
 where
@@ -432,6 +456,7 @@ where
                 .ignore_then(rest_of_line())
                 .map_with_span(|line, span| (Directive::Incext(line), span)),
             just("inctevent")
+                .or(just("inctext"))
                 .then_ignore(non_nl_whitespace().repeated().at_least(1))
                 .ignore_then(rest_of_line())
                 .map_with_span(|line, span| (Directive::Inctevent(line), span)),
@@ -464,8 +489,11 @@ where
     )
 }
 
-fn parser<E>(
-) -> impl Parser<char, Vec<OutImpl<SpannedW, VecW>>, Error = Carrier<char, E>>
+fn parser<E>() -> impl Parser<
+    char,
+    Vec<OutImpl<Unparsed, SpannedW, VecW>>,
+    Error = Carrier<char, E>,
+>
 where
     E: LexErrorHandler,
 {
@@ -500,63 +528,19 @@ where
         .repeated()
 }
 
-fn annot_with<T>(
-    owner: Option<Rc<str>>,
-    needed_by: Option<Rc<Location>>,
-    (value, span): (T, Span),
-    f: impl Fn(WithLocation<T>) -> Out,
-) -> Out {
-    f(WithLocation {
-        value,
-        loc: Location {
-            span: Some(span),
-            owner: owner.clone(),
-            needed_by: needed_by.clone(),
-        },
-    })
-}
-
-fn flatten_and_annot(
-    v: Vec<OutImpl<SpannedW, VecW>>,
-    owner: Option<Rc<str>>,
-    needed_by: Option<Rc<Location>>,
-) -> Vec<Out> {
+fn flatten(v: Vec<OutImpl<Unparsed, SpannedW, VecW>>) -> Vec<Out> {
     v.into_iter()
         .flat_map(|item| match item {
-            OutImpl::Token(toks) => toks
-                .into_iter()
-                .map(|tok| {
-                    annot_with(
-                        owner.clone(),
-                        needed_by.clone(),
-                        tok,
-                        Out::Token,
-                    )
-                })
-                .collect(),
+            OutImpl::Token(toks) => toks.into_iter().map(Out::Token).collect(),
             OutImpl::Directive(d) => {
-                vec![annot_with(
-                    owner.clone(),
-                    needed_by.clone(),
-                    d,
-                    Out::Directive,
-                )]
+                vec![Out::Directive(d)]
             }
-            OutImpl::Message(msg) => vec![annot_with(
-                owner.clone(),
-                needed_by.clone(),
-                msg,
-                Out::Message,
-            )],
+            OutImpl::Message(msg) => vec![Out::Message(msg)],
         })
         .collect()
 }
 
-pub fn lex<E>(
-    s: impl AsRef<str>,
-    owner: Option<Rc<str>>,
-    needed_by: Option<Rc<Location>>,
-) -> Result<Vec<Out>, Vec<E>>
+pub fn lex<E>(s: impl AsRef<str>) -> Result<Vec<Out>, Vec<E>>
 where
     E: LexErrorHandler,
 {
@@ -570,6 +554,6 @@ where
     parser()
         .then_ignore(end())
         .parse(s)
-        .map(|v| flatten_and_annot(v, owner, needed_by))
+        .map(flatten)
         .map_err(|errs| errs.into_iter().map(Carrier::into).collect())
 }
