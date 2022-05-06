@@ -79,8 +79,7 @@ impl Args for Unparsed {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Definition {
     Empty,
-    Rename(Vec<super::Token>),
-    Macro(IndexSet<String>, Vec<super::Token>),
+    Macro(Vec<super::Token>),
     Builtin,
 }
 
@@ -88,7 +87,7 @@ pub enum Definition {
 pub enum Parsed {}
 
 impl Args for Parsed {
-    type Define = (String, Definition);
+    type Define = (String, Option<IndexSet<String>>, Definition);
     type Include = RelativePathBuf;
     type Incbin = RelativePathBuf;
     type Incext = (RelativePathBuf, Vec<StringWithVars>);
@@ -121,11 +120,11 @@ impl Args for Parsed {
 // [lexer::OutImpl] type to intersperse the directive tree with regular tokens
 // and messages. As an example, from [preprocess.rs]:
 //
-//   struct TreeUnexpanded(
+//   struct Tree(
 //       Box<
 //           OutImpl<
 //               directive::Tree<
-//                   TreeUnexpanded,
+//                   Tree,
 //                   RelativePathBuf,
 //                   (RelativePathBuf, StringWithVars),
 //               >,
@@ -179,15 +178,15 @@ where
     Include: std::fmt::Debug + PartialEq + Eq,
     Inctevent: std::fmt::Debug + PartialEq + Eq,
 {
-    type Define = (String, Definition);
+    type Define = (String, Option<IndexSet<String>>, Definition);
     type Include = Include;
     type Incbin = RelativePathBuf;
-    type Incext = (RelativePathBuf, StringWithVars);
+    type Incext = (RelativePathBuf, Vec<StringWithVars>);
     type Inctevent = Inctevent;
-    type IfDef = (String, Vec<T>, Vec<T>);
-    type IfNDef = (String, Vec<T>, Vec<T>);
+    type IfDef = (String, T, Option<T>);
+    type IfNDef = (String, T, Option<T>);
     type Else = std::convert::Infallible;
     type Endif = std::convert::Infallible;
-    type Pool = std::convert::Infallible;
+    type Pool = ();
     type Undef = String;
 }

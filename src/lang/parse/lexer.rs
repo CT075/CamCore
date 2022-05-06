@@ -5,6 +5,9 @@
 // written before I had much experience with chumsky, so there's probably all
 // sorts of low-hanging simplifications here.
 
+// TODO: The entire parsing pipeline would be less complicated if [lex]
+// produced a token tree (with matched parens) instead of a flat stream
+
 use crate::{
     lang::syntax::{directive, directive::Unparsed, Span, SpannedW, Token},
     types::hkt::{IdentityW, VecW, Witness},
@@ -540,10 +543,15 @@ fn flatten(v: Vec<OutImpl<Unparsed, SpannedW, VecW>>) -> Vec<Out> {
         .collect()
 }
 
-pub fn lex<E>(s: impl AsRef<str>) -> Result<Vec<Out>, Vec<E>>
+pub fn lex<E>(
+    s: impl AsRef<str>,
+    span: Option<&Span>,
+) -> Result<Vec<Out>, Vec<E>>
 where
     E: LexErrorHandler,
 {
+    let Span { start, end: _ } = span.unwrap_or(&Span { start: 0, end: 0 });
+
     // This is a huge hack. Currently, chumsky does not handle repetition of
     // things like "end of line or end of input" very well, so we force an
     // end-of-line at the end of the input.
@@ -553,7 +561,12 @@ where
 
     parser()
         .then_ignore(end())
-        .parse(s)
+        .parse(chumsky::stream::Stream::from_iter(
+            *start..*start + s.len(),
+            s.chars()
+                .enumerate()
+                .map(|(i, c)| (c, i + start..i + start + 1)),
+        ))
         .map(flatten)
         .map_err(|errs| errs.into_iter().map(Carrier::into).collect())
 }

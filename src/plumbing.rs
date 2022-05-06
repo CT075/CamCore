@@ -8,10 +8,7 @@ pub fn id2<A, B>(x: A, y: B) -> (A, B) {
     (x, y)
 }
 
-pub fn map_first<A, A2, B, F>(
-    (x, y): (A, B),
-    f: impl FnOnce(A) -> A2,
-) -> (A2, B) {
+pub fn map_first<A, A2, B>((x, y): (A, B), f: impl FnOnce(A) -> A2) -> (A2, B) {
     (f(x), y)
 }
 

@@ -52,7 +52,7 @@ enum LexError {
 fn lex_no_loc<'a>(
     text: &'static str,
 ) -> Result<Vec<OutStripped>, Vec<LexError>> {
-    super::lex(text).map(|out_v| {
+    super::lex(text, None).map(|out_v| {
         out_v
             .into_iter()
             .map(|out| match out {

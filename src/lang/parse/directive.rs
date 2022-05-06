@@ -16,7 +16,7 @@ use crate::{
 };
 
 use super::{
-    lexer::{lex, LexErrorHandler, Out},
+    lexer::{lex, LexErrorHandler, Out as LexOut},
     Directive, GenericParseErrorHandler,
 };
 
@@ -47,6 +47,12 @@ pub trait DirectiveParseErrorHandler: GenericParseErrorHandler<char> {
     ) -> Self;
 
     fn macro_duplicate_arg(span: Span) -> Self;
+
+    fn macro_contains_directive(span: Span) -> Self;
+
+    fn macro_contains_message(span: Span) -> Self;
+
+    fn macro_contains_hash(span: Span) -> Self;
 }
 
 #[derive(Clone, Debug)]
@@ -385,6 +391,7 @@ where
                 .delimited_by(just('('), just(')'))
                 .or_not(),
         )
+        .padded()
         .try_map(|(name, args), _| {
             let args = match args {
                 None => return Ok((name, None)),
@@ -406,8 +413,30 @@ where
             Ok((name, Some(argset)))
         });
 
+    let param = choice((
+        choice((none_of("\"\\"), just('\\').ignore_then(just('"'))))
+            .repeated()
+            .delimited_by(just('"'), just('"')),
+        none_of("\"").repeated(),
+    ))
+    .collect::<String>()
+    .map_with_span(id2);
+
+    let (s, errs) = parse_and_map_errors(header.then(param.or_not()), arg);
+
+    let ((name, args), body) = match s {
+        None => return (None, errs),
+        Some(s) => s,
+    };
+
+    let (body, span) = match body {
+        None => return (Some((name, args, Definition::Empty)), errs),
+        Some(b) => b,
+    };
+
     enum S {
-        FoundHash,
+        FoundHash(Span),
+        UnclosedQuotes(Span),
     }
 
     impl GenericParseErrorHandler<char> for S {
@@ -432,19 +461,58 @@ where
         }
 
         fn unclosed_string_literal(span: Span) -> Self {
-            panic!("BUG: got []")
+            S::UnclosedQuotes(span)
         }
 
         fn bad_directive(span: Span) -> Self {
-            S::FoundHash
+            S::FoundHash(span)
         }
     }
 
-    // TODO: string escaping
-    let definition = maybe_quoted(none_of("\"").repeated().collect::<String>())
-        .try_map(|s, _| todo!());
+    let body: Result<Vec<LexOut>, Vec<S>> = lex(body, Some(&span));
+    let mut errs = errs;
 
-    parse_and_map_errors(definition, arg)
+    let body = match body {
+        Ok(body) => body,
+        Err(lex_errs) => {
+            errs.append(
+                &mut lex_errs
+                    .into_iter()
+                    .map(|e| match e {
+                        S::UnclosedQuotes(span) => E::unclosed_quotes(span),
+                        S::FoundHash(span) => E::macro_contains_hash(span),
+                    })
+                    .collect(),
+            );
+
+            vec![]
+        }
+    };
+
+    let mut body: Vec<Token> = body
+        .into_iter()
+        .filter_map(|t| match t {
+            LexOut::Token((t, _)) => Some(t),
+            LexOut::Directive((_, span)) => {
+                errs.push(E::macro_contains_directive(span));
+                None
+            }
+            LexOut::Message((_, span)) => {
+                errs.push(E::macro_contains_message(span));
+                None
+            }
+        })
+        .collect();
+
+    match &body.last() {
+        Some(Token::Break) => {
+            (&mut body).pop();
+        }
+        Some(_) | None => (),
+    };
+    let body = body;
+
+    (Some((name, args, Definition::Macro(body))), errs)
 }
 
 pub fn parse_include<E>(
@@ -462,7 +530,7 @@ pub fn parse_incbin<E>(
 where
     E: DirectiveParseErrorHandler,
 {
-    parse_one_path_impl(arg, Directive::Include(()))
+    parse_one_path_impl(arg, Directive::Incbin(()))
 }
 
 pub fn parse_ifdef<E>(
