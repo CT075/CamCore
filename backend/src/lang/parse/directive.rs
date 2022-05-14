@@ -191,7 +191,6 @@ where
 }
 
 fn command_line<E>(
-    why: Directive<NoPayload>,
 ) -> impl Parser<char, (RelativePathBuf, Vec<String>), Error = HandledError<E>>
 where
     E: DirectiveParseErrorHandler,
@@ -255,8 +254,7 @@ fn parse_command_line<E>(
 where
     E: DirectiveParseErrorHandler,
 {
-    let (result, mut errs) =
-        parse_and_map_errors(command_line(why.clone()), arg);
+    let (result, mut errs) = parse_and_map_errors(command_line(), arg);
 
     enum S {
         BadPostPercent(Span),
