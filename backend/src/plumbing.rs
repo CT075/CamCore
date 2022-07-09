@@ -36,3 +36,11 @@ pub fn fst<A, B>((x, _): (A, B)) -> A {
 pub fn snd<A, B>((_, y): (A, B)) -> B {
     y
 }
+
+pub fn flat_fst<A, B>(x: A, _: B) -> A {
+    x
+}
+
+pub fn flat_snd<A, B>(_: A, y: B) -> B {
+    y
+}

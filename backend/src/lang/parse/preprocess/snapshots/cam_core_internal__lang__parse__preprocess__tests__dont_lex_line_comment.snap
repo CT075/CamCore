@@ -1,0 +1,29 @@
+---
+source: backend/src/lang/parse/preprocess/tests.rs
+expression: "parse(r#\"/ / // this is not part of the line\"#)"
+---
+Ok(
+    Tree(
+        [
+            (
+                Line(
+                    [
+                        Single(
+                            (
+                                Slash,
+                                0..1,
+                            ),
+                        ),
+                        Single(
+                            (
+                                Slash,
+                                2..3,
+                            ),
+                        ),
+                    ],
+                ),
+                0..36,
+            ),
+        ],
+    ),
+)

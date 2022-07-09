@@ -1,6 +1,12 @@
 use std::{ops::Range, rc::Rc};
 
-use crate::types::hkt::{Apply, Functor, Witness};
+use indexmap::IndexSet;
+use relative_path::RelativePathBuf;
+
+use crate::types::{
+    hkt::{Apply, Functor, Witness},
+    StringWithVars,
+};
 
 pub type Span = Range<usize>;
 
@@ -53,7 +59,6 @@ impl Functor for WithLocationW {
 }
 
 pub mod directive;
-pub use directive::Directive;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Token {
@@ -63,6 +68,7 @@ pub enum Token {
     Colon,
     Dash,
     Emdash,
+    Semi,
     Slash,
     Star,
     Plus,
@@ -75,13 +81,53 @@ pub enum Token {
     RShift,
     //Hash,
     Comma,
-    LCurly,
-    RCurly,
-    LParen,
-    RParen,
-    LBrack,
-    RBrack,
     LAngle,
     RAngle,
-    Break,
+    Error,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum GroupKind {
+    Paren,
+    Square,
+    Curly,
+}
+
+#[derive(Debug, Clone)]
+pub enum TokenGroup {
+    Single(Spanned<Token>),
+    Group {
+        kind: GroupKind,
+        members: Vec<TokenGroup>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct Tree(pub Vec<Spanned<Node>>);
+
+#[derive(Debug, Clone)]
+pub enum Node {
+    Message(StringWithVars),
+    Line(Vec<TokenGroup>),
+    Directive(Directive),
+}
+
+#[derive(Debug, Clone)]
+pub enum Definition {
+    Empty,
+    Macro(Vec<TokenGroup>),
+    Builtin,
+}
+
+#[derive(Debug, Clone)]
+pub enum Directive {
+    IfDef(String, Tree, Tree),
+    IfNDef(String, Tree, Tree),
+    Define(String, Option<IndexSet<String>>, Definition),
+    Include(RelativePathBuf),
+    Incbin(RelativePathBuf),
+    Incext(RelativePathBuf, Vec<StringWithVars>),
+    Inctevent(RelativePathBuf, Vec<StringWithVars>),
+    Pool,
+    Undef(String),
 }

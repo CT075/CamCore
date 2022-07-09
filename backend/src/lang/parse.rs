@@ -13,8 +13,8 @@ use std::collections::HashSet;
 
 use super::syntax::{Directive, Span};
 
-mod directive;
-pub mod lexer;
+//mod directive;
+//pub mod lexer;
 pub mod preprocess;
 
 #[derive(Debug)]

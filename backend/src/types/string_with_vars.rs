@@ -88,6 +88,10 @@ mod parser {
         fn unclosed_var(span: Span) -> Self;
     }
 
+    // TODO: The use of [Simple] here is a bit hacky. We can't use
+    // [syntax::Carrier] because of the canonicity check (because we'd have two
+    // blanket impls for Carrier<char>), so we have to check the label post-hoc
+    // instead.
     fn parser() -> impl Parser<char, super::S, Error = Simple<char>> {
         let non_escape = none_of("%");
         let literal_percent = just("%%").to('%');
@@ -131,12 +135,10 @@ mod parser {
                         Some("ident") => {
                             E::bad_identifier(restrict_span(outer, &e.span()))
                         }
-                        Some("end") => {
-                            E::unclosed_var(restrict_span(outer, &e.span()))
+                        Some("end") => E::unclosed_var(restrict_span(outer, &e.span())),
+                        Some(_) | None => {
+                            panic!("BUG: template parsing produced unlabelled error")
                         }
-                        Some(_) | None => panic!(
-                            "bug: template parsing produced unlabelled error"
-                        ),
                     })
                     .collect()
             })

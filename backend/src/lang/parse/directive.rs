@@ -15,10 +15,7 @@ use crate::{
     types::{string_with_vars, StringWithVars},
 };
 
-use super::{
-    lexer::{lex, LexErrorHandler, Out as LexOut},
-    Directive, GenericParseErrorHandler,
-};
+use super::{Directive, GenericParseErrorHandler};
 
 use chumsky::{
     error::{Error as ChumskyError, Simple},
