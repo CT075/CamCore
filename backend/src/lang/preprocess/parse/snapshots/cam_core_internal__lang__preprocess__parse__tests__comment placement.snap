@@ -1,0 +1,36 @@
+---
+source: backend/src/lang/preprocess/parse/tests.rs
+expression: "parse(r#\"#define/**/A(B,/**/ /**/C)/**/ \"B C\" /**/ // a b c\"#)"
+---
+Ok(
+    Tree(
+        [
+            (
+                Directive(
+                    Define(
+                        "A",
+                        Some(
+                            {
+                                "B",
+                                "C",
+                            },
+                        ),
+                        Macro(
+                            [
+                                Single(
+                                    (
+                                        QuotedString(
+                                            "B C",
+                                        ),
+                                        31..36,
+                                    ),
+                                ),
+                            ],
+                        ),
+                    ),
+                ),
+                0..51,
+            ),
+        ],
+    ),
+)

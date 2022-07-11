@@ -1,0 +1,22 @@
+---
+source: backend/src/lang/preprocess/parse/tests.rs
+expression: "parse(r#\"MESSAGE this message / /* contains */ // comments\"#)"
+---
+Ok(
+    Tree(
+        [
+            (
+                Message(
+                    S(
+                        [
+                            Text(
+                                "this message /",
+                            ),
+                        ],
+                    ),
+                ),
+                0..50,
+            ),
+        ],
+    ),
+)

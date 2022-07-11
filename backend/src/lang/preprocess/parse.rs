@@ -3,14 +3,16 @@ use indexmap::IndexSet;
 use relative_path::RelativePathBuf;
 
 use crate::{
-    lang::syntax::{
-        Definition, Directive, GroupKind, Node, Span, Token, TokenGroup, Tree,
+    lang::{
+        parse::common::{Carrier, GenericParseErrorHandler},
+        syntax::{
+            Definition, Directive, GroupKind, Node, Span, Token, TokenGroup,
+            Tree,
+        },
     },
     plumbing::*,
     types::{string_with_vars, StringWithVars},
 };
-
-use super::{Carrier, GenericParseErrorHandler};
 
 #[cfg(test)]
 mod tests;
@@ -317,6 +319,7 @@ where
         .map(|(then, else_)| (then, else_.unwrap_or(Tree(vec![]))))
 }
 
+// XXX: This function doesn't quite handle nested quotes in defines properly.
 fn define<E>() -> impl Parser<char, Directive, Error = Carrier<char, E>> + Clone
 where
     E: PpSyntaxErrorHandler,

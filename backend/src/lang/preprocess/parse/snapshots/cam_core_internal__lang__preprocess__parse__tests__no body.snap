@@ -1,0 +1,22 @@
+---
+source: backend/src/lang/preprocess/parse/tests.rs
+expression: "parse(r#\"#define A\"#)"
+---
+Ok(
+    Tree(
+        [
+            (
+                Directive(
+                    Define(
+                        "A",
+                        None,
+                        Macro(
+                            [],
+                        ),
+                    ),
+                ),
+                0..10,
+            ),
+        ],
+    ),
+)

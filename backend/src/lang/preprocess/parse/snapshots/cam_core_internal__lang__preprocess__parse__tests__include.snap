@@ -1,0 +1,18 @@
+---
+source: backend/src/lang/preprocess/parse/tests.rs
+expression: "parse(r#\"#include A/B/C // a b c\"#)"
+---
+Ok(
+    Tree(
+        [
+            (
+                Directive(
+                    Include(
+                        "A/B/C",
+                    ),
+                ),
+                0..24,
+            ),
+        ],
+    ),
+)

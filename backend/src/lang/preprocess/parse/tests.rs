@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
-use super::{super::GenericParseErrorHandler, *};
+use super::*;
+use crate::lang::parse::common::GenericParseErrorHandler;
 
 #[derive(Debug, PartialEq, Eq)]
 enum Error {
@@ -337,17 +338,21 @@ fn test_include() {
 
 #[test]
 fn test_define() {
-    insta::assert_debug_snapshot!(parse(r#"#define A(B, C) "B C""#));
+    insta::assert_debug_snapshot!(
+        "args and quotes",
+        parse(r#"#define A(B, C) "B C""#)
+    );
 
-    insta::assert_debug_snapshot!(parse(r#"#define A "B C""#));
+    insta::assert_debug_snapshot!("quotes only", parse(r#"#define A "B C""#));
 
-    insta::assert_debug_snapshot!(parse(r#"#define A"#));
+    insta::assert_debug_snapshot!("no body", parse(r#"#define A"#));
 
-    insta::assert_debug_snapshot!(parse(
-        r#"#define/**/A(B,/**/ /**/C)/**/ "B C" /**/ // a b c"#
-    ));
+    insta::assert_debug_snapshot!(
+        "comment placement",
+        parse(r#"#define/**/A(B,/**/ /**/C)/**/ "B C" /**/ // a b c"#)
+    );
 
-    insta::assert_debug_snapshot!(parse(r#"#define A(B,C)C"#));
+    insta::assert_debug_snapshot!("spaces", parse(r#"#define A(B,C)C"#));
 }
 
 #[test]
