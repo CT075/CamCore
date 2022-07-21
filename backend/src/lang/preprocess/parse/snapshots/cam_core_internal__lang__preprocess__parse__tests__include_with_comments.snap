@@ -11,7 +11,20 @@ Ok(
                         "A/B/C",
                     ),
                 ),
-                0..41,
+                Span {
+                    source: Source(
+                        "test.event",
+                    ),
+                    span: Position {
+                        offset: 0,
+                        row: 0,
+                        col: 0,
+                    }..Position {
+                        offset: 41,
+                        row: 1,
+                        col: 0,
+                    },
+                },
             ),
         ],
     ),

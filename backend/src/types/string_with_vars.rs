@@ -1,19 +1,15 @@
 use std::collections::HashMap;
 
-use crate::lang::syntax::{restrict_span, Span};
+use crate::lang::syntax::{Span, Spanned};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Element {
     Text(String),
-    Var(String),
+    Var(Spanned<String>),
 }
 
 pub fn text(s: String) -> Element {
     Element::Text(s)
-}
-
-pub fn var(s: String) -> Element {
-    Element::Var(s)
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -51,12 +47,9 @@ impl S {
         for item in self.0 {
             match item {
                 Element::Text(s) => out.push_str(s.as_ref()),
-                Element::Var(v) => match context.get(&v) {
+                Element::Var((v, span)) => match context.get(&v) {
                     Some(val) => out.push_str(val.as_ref()),
-                    None => errors.push(E::unknown_var(
-                        v.clone(),
-                        out.len()..out.len() + v.len(),
-                    )),
+                    None => errors.push(E::unknown_var(v.clone(), span)),
                 },
             }
         }
@@ -78,7 +71,9 @@ impl From<Vec<Element>> for S {
 mod parser {
     use chumsky::{error::Simple, prelude::*};
 
-    use super::{restrict_span, Element, Span};
+    use crate::lang::syntax::span::{stream_spanned, Position, Source};
+
+    use super::{Element, Span};
 
     pub trait ParseErrorHandler {
         fn bad_post_percent(span: Span) -> Self;
@@ -92,7 +87,7 @@ mod parser {
     // [syntax::Carrier] because of the canonicity check (because we'd have two
     // blanket impls for Carrier<char>), so we have to check the label post-hoc
     // instead.
-    fn parser() -> impl Parser<char, super::S, Error = Simple<char>> {
+    fn parser() -> impl Parser<char, super::S, Error = Simple<char, Span>> {
         let non_escape = none_of("%");
         let literal_percent = just("%%").to('%');
 
@@ -111,31 +106,32 @@ mod parser {
                     .labelled("ident"),
             )
             .labelled("end")
-            .map(Element::Var);
+            .map_with_span(|v, span| Element::Var((v, span)));
 
         text.or(var).labelled("start").repeated().map(super::S)
     }
 
     impl super::S {
         pub fn parse<E>(
+            source: Option<&Source>,
+            start: Option<&Position>,
             s: impl AsRef<str>,
-            outer_span: Option<&Span>,
         ) -> Result<Self, Vec<E>>
         where
             E: ParseErrorHandler,
         {
-            let outer = outer_span.unwrap_or(&Span { start: 0, end: 0 });
+            let stream = stream_spanned(source, start, s);
 
-            parser().then_ignore(end()).parse(s.as_ref()).map_err(|v| {
+            parser().then_ignore(end()).parse(stream).map_err(|v| {
                 v.into_iter()
                     .map(|e| match e.label() {
                         Some("start") => {
-                            E::bad_post_percent(restrict_span(outer, &e.span()))
+                            E::bad_post_percent(e.span())
                         }
                         Some("ident") => {
-                            E::bad_identifier(restrict_span(outer, &e.span()))
+                            E::bad_identifier(e.span())
                         }
-                        Some("end") => E::unclosed_var(restrict_span(outer, &e.span())),
+                        Some("end") => E::unclosed_var(e.span()),
                         Some(_) | None => {
                             panic!("BUG: template parsing produced unlabelled error")
                         }
@@ -148,7 +144,10 @@ mod parser {
 
 #[cfg(test)]
 mod tests {
-    use crate::lang::syntax::Span;
+    use crate::lang::syntax::{
+        span::{Position, Source},
+        Span,
+    };
 
     use super::*;
 
@@ -181,7 +180,7 @@ mod tests {
     }
 
     fn parse(s: &'static str) -> Result<super::S, Vec<E>> {
-        S::parse(s, None)
+        S::parse(None, None, s)
     }
 
     #[test]
@@ -190,11 +189,24 @@ mod tests {
 
         let result: Result<_, Vec<E>> = parse(s);
 
+        let span = Span {
+            source: Source::new("_unknown_"),
+            span: Position {
+                offset: 25,
+                row: 0,
+                col: 25,
+            }..Position {
+                offset: 31,
+                row: 0,
+                col: 31,
+            },
+        };
+
         assert_eq!(
             result,
             Ok(super::S(vec![
                 Element::Text("this is some text with a ".to_string()),
-                Element::Var("var".to_string()),
+                Element::Var(("var".to_string(), span)),
                 Element::Text(" or two, and some %{text}".to_string())
             ]))
         )

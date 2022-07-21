@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use chumsky::{error::Error as ChumskyError, prelude::*};
 use indexmap::IndexSet;
 use relative_path::RelativePathBuf;
@@ -6,8 +8,9 @@ use crate::{
     lang::{
         parse::common::{Carrier, GenericParseErrorHandler},
         syntax::{
-            Definition, Directive, GroupKind, Node, Span, Token, TokenGroup,
-            Tree,
+            span::{stream_spanned, Source},
+            Directive, GroupKind, MacroBody, Node, Span, Spanned, Token,
+            TokenGroup, Tree,
         },
     },
     plumbing::*,
@@ -220,7 +223,7 @@ where
     E: PpSyntaxErrorHandler,
     F: FnMut(Carrier<char, E>) -> () + ?Sized,
 {
-    match StringWithVars::parse(&s, Some(span)) {
+    match StringWithVars::parse(Some(span.source()), Some(span.start()), &s) {
         Ok(s) => s,
         Err(errs) => {
             for err in errs {
@@ -371,7 +374,11 @@ where
     let body = just('\"')
         .map_with_span(flat_snd)
         .or_not()
-        .then(token_group().separated_by(token_separator()))
+        .then(
+            token_group()
+                .map_with_span(id2)
+                .separated_by(token_separator()),
+        )
         .then(just('\"').map_with_span(flat_snd).or_not())
         .validate(|((startquote, body), endquote), _, fail| {
             match (startquote, endquote) {
@@ -391,10 +398,8 @@ where
     header
         .then(body)
         .map(|((name, args), body)| match body {
-            None => Directive::Define(name, args, Definition::Empty),
-            Some(body) => {
-                Directive::Define(name, args, Definition::Macro(body))
-            }
+            None => Directive::Define(name, args, MacroBody::Empty),
+            Some(body) => Directive::Define(name, args, MacroBody::Macro(body)),
         })
         .then_ignore(
             end_of_line().labelled(PpSyntaxKind::DirectiveEnd("define")),
@@ -600,7 +605,7 @@ where
     let quoted_string = quoted_string();
 
     choice((
-        ident.map(Token::Ident),
+        ident.map(|s| Token::Ident(Rc::new(s))),
         number.map(|(payload, radix)| Token::Number { payload, radix }),
         quoted_string.map(Token::QuotedString),
         just(':').to(Token::Colon),
@@ -642,6 +647,7 @@ where
 {
     token_group
         .clone()
+        .map_with_span(id2)
         .separated_by(token_separator())
         .delimited_by(just(l), just(r))
         .map(move |members| TokenGroup::Group { kind, members })
@@ -664,11 +670,12 @@ where
 }
 
 fn line<E>(
-) -> impl Parser<char, Vec<TokenGroup>, Error = Carrier<char, E>> + Clone
+) -> impl Parser<char, Vec<Spanned<TokenGroup>>, Error = Carrier<char, E>> + Clone
 where
     E: PpSyntaxErrorHandler,
 {
     token_group()
+        .map_with_span(id2)
         .separated_by(token_separator())
         .then_ignore(end_of_line())
 }
@@ -682,7 +689,11 @@ where
     let message = just("MESSAGE")
         .padded_by(non_nl_whitespace().repeated())
         .ignore_then(rest_of_line().validate(|v, span, fail| {
-            match StringWithVars::parse(&v, Some(&span)) {
+            match StringWithVars::parse(
+                Some(span.source()),
+                Some(span.start()),
+                &v,
+            ) {
                 Ok(s) => s,
                 Err(errs) => {
                     for err in errs {
@@ -713,7 +724,7 @@ where
     })
 }
 
-pub fn parse<E>(s: impl AsRef<str>) -> Result<Tree, Vec<E>>
+pub fn parse<E>(source: &Source, s: impl AsRef<str>) -> Result<Tree, Vec<E>>
 where
     E: PpSyntaxErrorHandler,
 {
@@ -726,6 +737,6 @@ where
 
     tree()
         .then_ignore(end())
-        .parse(s)
+        .parse(stream_spanned(Some(source), None, s))
         .map_err(|errs| errs.into_iter().map(Carrier::into).collect())
 }

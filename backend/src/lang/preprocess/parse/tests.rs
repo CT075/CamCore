@@ -110,7 +110,7 @@ fn run_parser<O>(
     text: &'static str,
 ) -> Result<O, Vec<Error>> {
     parser
-        .parse(text)
+        .parse(stream_spanned(Some(&Source::new("test")), None, text))
         .map_err(|errs| errs.into_iter().map(Carrier::into).collect())
 }
 
@@ -118,58 +118,90 @@ fn run_parser<O>(
 fn line_comment_eof() {
     let line_comment = super::line_comment::<Error>().then_ignore(end());
 
-    let eof = r#"// this is a line comment"#;
-
-    assert_eq!(run_parser(line_comment.clone(), eof), Ok(()));
+    insta::assert_debug_snapshot!(
+        run_parser(line_comment.clone(), r#"// this is a line comment"#),
+        @r###"
+    Ok(
+        (),
+    )
+    "###);
 }
 
 #[test]
 fn line_comment_escaped() {
     let line_comment = super::line_comment::<Error>().then_ignore(end());
 
-    let escaped = r#"// this is a line comment \
-                  that is escaped"#;
-
-    assert_eq!(run_parser(line_comment.clone(), escaped), Ok(()));
+    insta::assert_debug_snapshot!(
+        run_parser(
+            line_comment.clone(),
+            r#"// this is a line comment \
+            that is escaped"#),
+        @r###"
+    Ok(
+        (),
+    )
+    "###);
 }
 
 #[test]
 fn block_comment_basic() {
     let block_comment = super::block_comment::<Error>().then_ignore(end());
 
-    let basic = r#"/* comment
-        */"#;
-
-    assert_eq!(run_parser(block_comment.clone(), basic), Ok(()));
+    insta::assert_debug_snapshot!(
+        run_parser(
+            block_comment.clone(),
+            r#"/* comment
+            */"#),
+        @r###"
+    Ok(
+        (),
+    )
+    "###);
 }
 
 #[test]
 fn block_comment_no_contents() {
     let block_comment = super::block_comment::<Error>().then_ignore(end());
 
-    let basic = r#"/**/"#;
-
-    assert_eq!(run_parser(block_comment.clone(), basic), Ok(()));
+    insta::assert_debug_snapshot!(
+        run_parser(block_comment.clone(), r#"/**/"#),
+        @r###"
+    Ok(
+        (),
+    )
+    "###);
 }
 
 #[test]
 fn block_comment_nested() {
     let block_comment = super::block_comment::<Error>().then_ignore(end());
 
-    let nested = r#"/* a /* b */ c */"#;
-
-    assert_eq!(run_parser(block_comment.clone(), nested), Ok(()));
+    insta::assert_debug_snapshot!(
+        run_parser(
+            block_comment.clone(),
+            r#"/* a /* b */ c */"#),
+        @r###"
+    Ok(
+        (),
+    )
+    "###);
 }
 
 #[test]
 fn block_comment_containing_line_comment() {
     let block_comment = super::block_comment::<Error>().then_ignore(end());
 
-    let with_line = r#"/*
-      // this line is commented */
-      */"#;
-
-    assert_eq!(run_parser(block_comment.clone(), with_line), Ok(()));
+    insta::assert_debug_snapshot!(
+        run_parser(
+            block_comment.clone(),
+            r#"/*
+              // this line is commented */
+              */"#),
+        @r###"
+    Ok(
+        (),
+    )
+    "###);
 }
 
 #[test]
@@ -178,10 +210,31 @@ fn block_comment_basic_unclosed() {
 
     let unclosed = r#"/*"#;
 
-    assert_eq!(
+    insta::assert_debug_snapshot!(
         run_parser(block_comment.clone(), unclosed),
-        Err(vec![Error::UnclosedComment(0..2)])
-    );
+        @r###"
+    Err(
+        [
+            UnclosedComment(
+                Span {
+                    source: Source(
+                        "test",
+                    ),
+                    span: Position {
+                        offset: 0,
+                        row: 0,
+                        col: 0,
+                    }..Position {
+                        offset: 2,
+                        row: 0,
+                        col: 2,
+                    },
+                },
+            ),
+        ],
+    )
+    "###
+    )
 }
 
 #[test]
@@ -190,9 +243,30 @@ fn block_comment_nested_unclosed() {
 
     let nested = r#"/* /* */"#;
 
-    assert_eq!(
+    insta::assert_debug_snapshot!(
         run_parser(block_comment.clone(), nested),
-        Err(vec![Error::UnclosedComment(0..2)])
+        @r###"
+    Err(
+        [
+            UnclosedComment(
+                Span {
+                    source: Source(
+                        "test",
+                    ),
+                    span: Position {
+                        offset: 0,
+                        row: 0,
+                        col: 0,
+                    }..Position {
+                        offset: 2,
+                        row: 0,
+                        col: 2,
+                    },
+                },
+            ),
+        ],
+    )
+    "###
     );
 }
 
@@ -298,14 +372,35 @@ fn quoted_string_unclosed() {
 
     let s = r#""not closed"#;
 
-    assert_eq!(
+    insta::assert_debug_snapshot!(
         run_parser(string.clone(), s),
-        Err(vec![Error::UnclosedQuotes(0..1)])
+        @r###"
+    Err(
+        [
+            UnclosedQuotes(
+                Span {
+                    source: Source(
+                        "test",
+                    ),
+                    span: Position {
+                        offset: 0,
+                        row: 0,
+                        col: 0,
+                    }..Position {
+                        offset: 1,
+                        row: 0,
+                        col: 1,
+                    },
+                },
+            ),
+        ],
+    )
+    "###
     )
 }
 
 fn parse(s: &'static str) -> Result<Tree, Vec<Error>> {
-    super::parse(s)
+    super::parse(&Source::new("test.event".to_owned()), s)
 }
 
 #[test]
@@ -368,7 +463,20 @@ fn bad_directive() {
     Err(
         [
             BadDirective(
-                1..2,
+                Span {
+                    source: Source(
+                        "test.event",
+                    ),
+                    span: Position {
+                        offset: 1,
+                        row: 0,
+                        col: 1,
+                    }..Position {
+                        offset: 2,
+                        row: 0,
+                        col: 2,
+                    },
+                },
             ),
         ],
     )
@@ -390,7 +498,20 @@ some/text/on/a/new/line"#
                             "some/text/on/a/new/line",
                         ),
                     ),
-                    0..35,
+                    Span {
+                        source: Source(
+                            "test.event",
+                        ),
+                        span: Position {
+                            offset: 0,
+                            row: 0,
+                            col: 0,
+                        }..Position {
+                            offset: 35,
+                            row: 2,
+                            col: 0,
+                        },
+                    },
                 ),
             ],
         ),
@@ -410,25 +531,96 @@ fn midline_multiline_comment() {
                 (
                     Line(
                         [
-                            Single(
-                                (
-                                    Ident(
-                                        "A",
+                            (
+                                Single(
+                                    (
+                                        Ident(
+                                            "A",
+                                        ),
+                                        Span {
+                                            source: Source(
+                                                "test.event",
+                                            ),
+                                            span: Position {
+                                                offset: 0,
+                                                row: 0,
+                                                col: 0,
+                                            }..Position {
+                                                offset: 1,
+                                                row: 0,
+                                                col: 1,
+                                            },
+                                        },
                                     ),
-                                    0..1,
                                 ),
+                                Span {
+                                    source: Source(
+                                        "test.event",
+                                    ),
+                                    span: Position {
+                                        offset: 0,
+                                        row: 0,
+                                        col: 0,
+                                    }..Position {
+                                        offset: 12,
+                                        row: 1,
+                                        col: 7,
+                                    },
+                                },
                             ),
-                            Single(
-                                (
-                                    Ident(
-                                        "B",
+                            (
+                                Single(
+                                    (
+                                        Ident(
+                                            "B",
+                                        ),
+                                        Span {
+                                            source: Source(
+                                                "test.event",
+                                            ),
+                                            span: Position {
+                                                offset: 12,
+                                                row: 1,
+                                                col: 7,
+                                            }..Position {
+                                                offset: 13,
+                                                row: 1,
+                                                col: 8,
+                                            },
+                                        },
                                     ),
-                                    12..13,
                                 ),
+                                Span {
+                                    source: Source(
+                                        "test.event",
+                                    ),
+                                    span: Position {
+                                        offset: 12,
+                                        row: 1,
+                                        col: 7,
+                                    }..Position {
+                                        offset: 13,
+                                        row: 1,
+                                        col: 8,
+                                    },
+                                },
                             ),
                         ],
                     ),
-                    0..14,
+                    Span {
+                        source: Source(
+                            "test.event",
+                        ),
+                        span: Position {
+                            offset: 0,
+                            row: 0,
+                            col: 0,
+                        }..Position {
+                            offset: 14,
+                            row: 2,
+                            col: 0,
+                        },
+                    },
                 ),
             ],
         ),
@@ -447,47 +639,189 @@ NewChName:"#), @r###"
                 (
                     Line(
                         [
-                            Single(
-                                (
-                                    Ident(
-                                        "ALIGN",
+                            (
+                                Single(
+                                    (
+                                        Ident(
+                                            "ALIGN",
+                                        ),
+                                        Span {
+                                            source: Source(
+                                                "test.event",
+                                            ),
+                                            span: Position {
+                                                offset: 0,
+                                                row: 0,
+                                                col: 0,
+                                            }..Position {
+                                                offset: 5,
+                                                row: 0,
+                                                col: 5,
+                                            },
+                                        },
                                     ),
-                                    0..5,
                                 ),
-                            ),
-                            Single(
-                                (
-                                    Number {
-                                        payload: "4",
-                                        radix: 10,
+                                Span {
+                                    source: Source(
+                                        "test.event",
+                                    ),
+                                    span: Position {
+                                        offset: 0,
+                                        row: 0,
+                                        col: 0,
+                                    }..Position {
+                                        offset: 6,
+                                        row: 0,
+                                        col: 6,
                                     },
-                                    6..7,
+                                },
+                            ),
+                            (
+                                Single(
+                                    (
+                                        Number {
+                                            payload: "4",
+                                            radix: 10,
+                                        },
+                                        Span {
+                                            source: Source(
+                                                "test.event",
+                                            ),
+                                            span: Position {
+                                                offset: 6,
+                                                row: 0,
+                                                col: 6,
+                                            }..Position {
+                                                offset: 7,
+                                                row: 0,
+                                                col: 7,
+                                            },
+                                        },
+                                    ),
                                 ),
+                                Span {
+                                    source: Source(
+                                        "test.event",
+                                    ),
+                                    span: Position {
+                                        offset: 6,
+                                        row: 0,
+                                        col: 6,
+                                    }..Position {
+                                        offset: 7,
+                                        row: 0,
+                                        col: 7,
+                                    },
+                                },
                             ),
                         ],
                     ),
-                    0..8,
+                    Span {
+                        source: Source(
+                            "test.event",
+                        ),
+                        span: Position {
+                            offset: 0,
+                            row: 0,
+                            col: 0,
+                        }..Position {
+                            offset: 8,
+                            row: 1,
+                            col: 0,
+                        },
+                    },
                 ),
                 (
                     Line(
                         [
-                            Single(
-                                (
-                                    Ident(
-                                        "NewChName",
+                            (
+                                Single(
+                                    (
+                                        Ident(
+                                            "NewChName",
+                                        ),
+                                        Span {
+                                            source: Source(
+                                                "test.event",
+                                            ),
+                                            span: Position {
+                                                offset: 8,
+                                                row: 1,
+                                                col: 0,
+                                            }..Position {
+                                                offset: 17,
+                                                row: 1,
+                                                col: 9,
+                                            },
+                                        },
                                     ),
-                                    8..17,
                                 ),
+                                Span {
+                                    source: Source(
+                                        "test.event",
+                                    ),
+                                    span: Position {
+                                        offset: 8,
+                                        row: 1,
+                                        col: 0,
+                                    }..Position {
+                                        offset: 17,
+                                        row: 1,
+                                        col: 9,
+                                    },
+                                },
                             ),
-                            Single(
-                                (
-                                    Colon,
-                                    17..18,
+                            (
+                                Single(
+                                    (
+                                        Colon,
+                                        Span {
+                                            source: Source(
+                                                "test.event",
+                                            ),
+                                            span: Position {
+                                                offset: 17,
+                                                row: 1,
+                                                col: 9,
+                                            }..Position {
+                                                offset: 18,
+                                                row: 1,
+                                                col: 10,
+                                            },
+                                        },
+                                    ),
                                 ),
+                                Span {
+                                    source: Source(
+                                        "test.event",
+                                    ),
+                                    span: Position {
+                                        offset: 17,
+                                        row: 1,
+                                        col: 9,
+                                    }..Position {
+                                        offset: 18,
+                                        row: 1,
+                                        col: 10,
+                                    },
+                                },
                             ),
                         ],
                     ),
-                    8..19,
+                    Span {
+                        source: Source(
+                            "test.event",
+                        ),
+                        span: Position {
+                            offset: 8,
+                            row: 1,
+                            col: 0,
+                        }..Position {
+                            offset: 19,
+                            row: 2,
+                            col: 0,
+                        },
+                    },
                 ),
             ],
         ),

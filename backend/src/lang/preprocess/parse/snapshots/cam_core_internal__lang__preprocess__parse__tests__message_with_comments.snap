@@ -15,7 +15,20 @@ Ok(
                         ],
                     ),
                 ),
-                0..50,
+                Span {
+                    source: Source(
+                        "test.event",
+                    ),
+                    span: Position {
+                        offset: 0,
+                        row: 0,
+                        col: 0,
+                    }..Position {
+                        offset: 50,
+                        row: 1,
+                        col: 0,
+                    },
+                },
             ),
         ],
     ),

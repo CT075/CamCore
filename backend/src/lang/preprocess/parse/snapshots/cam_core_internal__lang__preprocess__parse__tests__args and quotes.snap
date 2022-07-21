@@ -17,19 +17,61 @@ Ok(
                         ),
                         Macro(
                             [
-                                Single(
-                                    (
-                                        QuotedString(
-                                            "B C",
+                                (
+                                    Single(
+                                        (
+                                            QuotedString(
+                                                "B C",
+                                            ),
+                                            Span {
+                                                source: Source(
+                                                    "test.event",
+                                                ),
+                                                span: Position {
+                                                    offset: 16,
+                                                    row: 0,
+                                                    col: 16,
+                                                }..Position {
+                                                    offset: 21,
+                                                    row: 0,
+                                                    col: 21,
+                                                },
+                                            },
                                         ),
-                                        16..21,
                                     ),
+                                    Span {
+                                        source: Source(
+                                            "test.event",
+                                        ),
+                                        span: Position {
+                                            offset: 15,
+                                            row: 0,
+                                            col: 15,
+                                        }..Position {
+                                            offset: 21,
+                                            row: 0,
+                                            col: 21,
+                                        },
+                                    },
                                 ),
                             ],
                         ),
                     ),
                 ),
-                0..22,
+                Span {
+                    source: Source(
+                        "test.event",
+                    ),
+                    span: Position {
+                        offset: 0,
+                        row: 0,
+                        col: 0,
+                    }..Position {
+                        offset: 22,
+                        row: 1,
+                        col: 0,
+                    },
+                },
             ),
         ],
     ),
