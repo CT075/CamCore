@@ -5,9 +5,11 @@ use relative_path::RelativePathBuf;
 
 use crate::types::StringWithVars;
 
+mod impls;
 pub mod span;
 
-pub use span::{Span, Spanned};
+pub use impls::*;
+pub use span::{Span, Spanned, VerboseSpan, VerboseSpanned};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Token {
@@ -32,7 +34,12 @@ pub enum Token {
     Comma,
     LAngle,
     RAngle,
-    Error,
+    LParen,
+    RParen,
+    LBrace,
+    RBrace,
+    LCurly,
+    RCurly,
 }
 
 #[derive(Debug, Copy, Clone)]

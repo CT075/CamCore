@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, path::PathBuf, str::FromStr};
 
 use super::*;
 use crate::lang::parse::common::GenericParseErrorHandler;
@@ -110,7 +110,11 @@ fn run_parser<O>(
     text: &'static str,
 ) -> Result<O, Vec<Error>> {
     parser
-        .parse(stream_spanned(Some(&Source::new("test")), None, text))
+        .parse(stream_spanned(
+            Some(&Source::new(PathBuf::from_str("test").unwrap())),
+            None,
+            text,
+        ))
         .map_err(|errs| errs.into_iter().map(Carrier::into).collect())
 }
 

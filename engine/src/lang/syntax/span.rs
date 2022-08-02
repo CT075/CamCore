@@ -1,28 +1,36 @@
-use std::{default::Default, ops::Range, rc::Rc};
+// XXX: This probably doesn't belong under [lang].
+
+use std::{
+    default::Default,
+    ops::Range,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use crate::types::hkt::{Apply, Functor, Witness};
 
-// XXX CHORE: Instead of this, we could use a real global string interner with
-// [lazy_static]
+// XXX CHORE: Instead of using [Rc], we could use a real global string interner
+// with [lazy_static]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Source(Rc<String>);
-
-const DUMMY_SOURCE: &'static str = "_unknown_";
+pub enum Source {
+    Unknown,
+    File(Rc<PathBuf>),
+}
 
 impl Source {
-    pub fn new(s: impl AsRef<str>) -> Self {
-        Source(Rc::new(s.as_ref().to_owned()))
+    pub fn new(p: impl AsRef<Path>) -> Self {
+        Source::File(Rc::new(p.as_ref().to_owned()))
     }
 }
 
 impl Default for Source {
     fn default() -> Self {
-        Self::new(DUMMY_SOURCE.to_owned())
+        Self::Unknown
     }
 }
 
 // XXX: This entire song and dance is necessary to support [__LINE__],
-// [__COL__] and [__FILE__]. For error-reporting, all we actually need is
+// [__COL__] and [__FILE__]. For error reporting, all we actually need is
 // [offset] -- the error rendering library will recompute [row] and [col]
 // anyway. It would be great if we could just use [Span = (Source, Range<usize>)]
 // and call it a day.
