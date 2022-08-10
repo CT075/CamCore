@@ -22,7 +22,7 @@ pub trait RenderErrorHandler {
 impl S {
     pub fn render<E, Stringy>(
         &self,
-        lookup: impl Fn(&String) -> Option<Stringy>,
+        lookup: impl Fn(&String) -> (Option<Stringy>, Option<E>),
     ) -> Result<String, Vec<E>>
     where
         E: RenderErrorHandler,
@@ -35,7 +35,7 @@ impl S {
 
     pub fn render_into<'a, 'b, E, Stringy>(
         &self,
-        lookup: impl Fn(&String) -> Option<Stringy>,
+        lookup: impl Fn(&String) -> (Option<Stringy>, Option<E>),
         out: &'b mut String,
     ) -> Result<(), Vec<E>>
     where
@@ -48,8 +48,16 @@ impl S {
             match item {
                 Element::Text(s) => out.push_str(s.as_ref()),
                 Element::Var((v, span)) => match lookup(&v) {
-                    Some(val) => out.push_str(val.as_ref()),
-                    None => {
+                    (Some(val), None) => out.push_str(val.as_ref()),
+                    (Some(val), Some(e)) => {
+                        errors.push(e);
+                        out.push_str(val.as_ref());
+                    }
+                    (None, Some(e)) => {
+                        errors.push(e);
+                        errors.push(E::unknown_var(v.clone(), span.clone()));
+                    }
+                    (None, None) => {
                         errors.push(E::unknown_var(v.clone(), span.clone()))
                     }
                 },
@@ -192,7 +200,7 @@ mod tests {
         let result: Result<_, Vec<E>> = parse(s);
 
         let span = Span {
-            source: Source::new("_unknown_"),
+            source: Source::Unknown,
             span: Position {
                 offset: 25,
                 row: 0,
@@ -250,8 +258,8 @@ mod tests {
         let world = "world".to_owned();
 
         let result = s.render(|k| match k.as_str() {
-            "world" => Some(&world),
-            _ => None,
+            "world" => (Some(&world), None),
+            _ => (None, None),
         })?;
 
         assert_eq!(result, "hello, world!".to_string());

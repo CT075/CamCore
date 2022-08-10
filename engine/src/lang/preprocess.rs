@@ -10,6 +10,9 @@
 
 pub mod parse;
 
+#[cfg(test)]
+mod tests;
+
 use std::{
     collections::HashMap,
     marker::PhantomData,
@@ -202,10 +205,12 @@ pub trait Driver<E: ErrorHandler> {
     /// Run a process in `current_dir` and capture its output for event
     /// processing. See `request_file`.
     fn request_process_run<IOError>(
-        &self,
+        // this is mutable so that any errors from rendering [args] can be
+        // reported properly
+        &mut self,
         exe: &RelativePath,
         args: &Vec<StringWithVars>,
-        lookup_symbol: impl Fn(&String) -> (Option<String>, Option<E>),
+        lookup_symbol: impl Fn(&String) -> (Option<String>, Option<E>) + Copy,
         current_dir: Option<impl AsRef<Path>>,
     ) -> Result<(String, Source), IOError>
     where
