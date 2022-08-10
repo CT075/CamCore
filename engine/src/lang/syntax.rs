@@ -9,7 +9,7 @@ mod impls;
 pub mod span;
 
 pub use impls::*;
-pub use span::{Span, Spanned, VerboseSpan, VerboseSpanned};
+pub use span::{Span, Spanned};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Token {
@@ -49,6 +49,19 @@ pub enum GroupKind {
     Curly,
 }
 
+impl GroupKind {
+    pub fn delimiters(&self) -> (Token, Token) {
+        match self {
+            Self::Paren => (Token::LParen, Token::RParen),
+            Self::Square => (Token::LBrace, Token::RBrace),
+            Self::Curly => (Token::LCurly, Token::RCurly),
+        }
+    }
+}
+
+// TODO: In places where we don't care about the span (e.g. in macro
+// definitions), we shouldn't bother storing it. We can use HKT to accomplish
+// this.
 #[derive(Debug, Clone)]
 pub enum TokenGroup {
     Single(Spanned<Token>),

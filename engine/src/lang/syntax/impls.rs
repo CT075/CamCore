@@ -53,12 +53,12 @@ impl std::fmt::Display for TokenGroup {
                     GroupKind::Curly => ("{", "}"),
                 };
 
-                write!(f, "{}", open);
+                write!(f, "{}", open)?;
                 for (idx, (member, _span)) in members.iter().enumerate() {
                     if idx > 0 {
-                        write!(f, " ");
+                        write!(f, " ")?;
                     }
-                    write!(f, "{}", member);
+                    write!(f, "{}", member)?;
                 }
                 write!(f, "{}", close)
             }

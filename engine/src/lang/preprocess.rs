@@ -1,3 +1,13 @@
+// XXX: This architecture is _really_ complicated. Unfortunately, it's the only
+// design I can think of that satisfies all of the following criteria:
+//
+// - The expression parser has enough info to produce contextual errors. e.g.,
+//   [#define Eirika 1\nEirika:] should produce "[Eirika] is a macro and so
+//   can't be used as a label name" instead of "identifier expected".
+// - The preprocessor (macro expander), expression parser and raws engine live
+//   in separate modules.
+// - [#inctext] has the correct semantics.
+
 pub mod parse;
 
 use std::{
@@ -37,7 +47,8 @@ pub trait ErrorHandler: 'static {
     fn ambiguous_external_program(candidates: Vec<PathBuf>, span: Span)
         -> Self;
 
-    fn expanded_empty_definition(defn_site: Span, use_site: Span) -> Self;
+    fn expanded_empty_definition(definition_site: Span, use_site: Span)
+        -> Self;
 
     fn builtin_in_template(symbol: &String, span: Span) -> Self;
 
@@ -45,13 +56,65 @@ pub trait ErrorHandler: 'static {
 
     fn inctext_error(underlying: Self, span: Span) -> Self;
 
+    fn recursive_macro(
+        macro_name: &String,
+        definition_site: Span,
+        use_site: Span,
+    ) -> Self;
+
+    fn wrong_number_of_arguments(
+        macro_name: &String,
+        expected: usize,
+        actual: usize,
+        definition_site: Span,
+        span: Span,
+    ) -> Self;
+
+    fn macro_needs_arguments(
+        macro_name: &String,
+        definition_site: Option<Span>,
+        span: Span,
+    ) -> Self;
+
     fn io_error(underlying: std::io::Error, span: Span) -> Self;
 }
+
+// XXX: it'd be nice if we could somehow make this vector static
+fn builtins() -> HashMap<String, Definition> {
+    vec![
+        ("__LINE__", Definition::Reserved),
+        ("__FILE__", Definition::Reserved),
+        ("currentOffset", Definition::Reserved),
+    ]
+    .into_iter()
+    .map(|(s, d)| (s.to_string(), d))
+    .collect()
+}
+
+pub fn drive<E, D>(driver: D, file: impl AsRef<Path>, contents: String)
+where
+    E: ErrorHandler + parse::ErrorHandler,
+    D: Driver<E>,
+{
+    let mut context: Context<_, E> = Context {
+        driver,
+        defines: builtins(),
+        phantom: PhantomData,
+    };
+
+    context.process(
+        &Source::File(Rc::new(file.as_ref().to_path_buf())),
+        contents,
+        id,
+    )
+}
+
+pub struct Definitions<'a>(&'a HashMap<String, Definition>);
 
 enum Definition {
     // The separation between [Builtin] and [Reserved] here is for ease of
     // parsing. [Builtin]s take arguments, [Reserved]s don't.
-    Builtin(Box<dyn Fn(TokenGroup) -> TokenGroup>),
+    Builtin(Box<dyn Fn(Vec<Vec<TokenGroup>>) -> Vec<TokenGroup>>),
     Reserved,
     Empty(Span),
     Rename(Vec<TokenGroup>, Span),
@@ -65,10 +128,12 @@ enum Definition {
 /// Currently, we allow `#inctext` to run a program using `currentOffset` and
 /// other labels, etc, that are only known at runtime. This means that we have
 /// no choice but to fuse the preprocessing and actual assembly pass. However,
-/// for organization's sake, we should keep the directive processor (e.g., this
-/// file) separate from the raws engine etc.
+/// for organization's sake, we keep the directive processor (e.g., this file)
+/// separate from the raws engine and other transport concerns.
 pub trait Driver<E: ErrorHandler> {
-    /// Push a `MESSAGE` node to the driver.
+    /// Push a `MESSAGE` node to the driver. The type of `lookup_symbol` is
+    /// necessary to ensure that warnings are raised when expanding empty
+    /// symbols.
     fn push_message(
         &mut self,
         msg: &StringWithVars,
@@ -76,8 +141,12 @@ pub trait Driver<E: ErrorHandler> {
         span: Span,
     );
 
-    /// Push a regular line of assembly to the driver.
-    fn push_line(&mut self, line: Vec<VerboseSpanned<Token>>);
+    /// Push a line to the driver, along with all currently known definitions.
+    /// It is the driver's responsibility to call `expand_events_until_finished`
+    /// from this module to flatten the line into its constituent tokens. This
+    /// is to ensure that the driver doesn't lose context on the original user
+    /// input while parsing, which will help error granularity.
+    fn push_line<'a>(&'a mut self, definitions: Definitions<'a>, line: Events);
 
     /// Push a preprocessing error to the driver.
     fn push_error(&mut self, err: E);
@@ -138,7 +207,7 @@ pub trait Driver<E: ErrorHandler> {
         args: &Vec<StringWithVars>,
         lookup_symbol: impl Fn(&String) -> (Option<String>, Option<E>),
         current_dir: Option<impl AsRef<Path>>,
-    ) -> Result<String, IOError>
+    ) -> Result<(String, Source), IOError>
     where
         IOError: IOErrorHandler;
 }
@@ -154,11 +223,19 @@ where
     E: ErrorHandler + parse::ErrorHandler,
     D: Driver<E>,
 {
-    fn new(driver: D) -> Self {
-        Self {
-            driver,
-            defines: HashMap::new(),
-            phantom: PhantomData,
+    fn process(
+        &mut self,
+        source: &Source,
+        contents: impl AsRef<str>,
+        wrap_error: impl Fn(E) -> E,
+    ) {
+        match parse::parse(source, contents) {
+            Ok(tree) => self.walk(&tree),
+            Err(errs) => {
+                for err in errs.into_iter() {
+                    self.driver.push_error(wrap_error(err))
+                }
+            }
         }
     }
 
@@ -186,13 +263,22 @@ where
 
     fn handle_node(&mut self, node: &Node, span: &Span) {
         match node {
-            Node::Line(line) => panic!("todo"),
             Node::Directive(d) => self.dispatch_directive(d, span),
             Node::Message(swv) => self.driver.push_message(
                 swv,
                 |s| lookup_symbol_for_rendering(&self.defines, s, span.clone()),
                 span.clone(),
             ),
+            Node::Line(line) => match parse_events(&self.defines, &line) {
+                Err(errs) => {
+                    for err in errs {
+                        self.driver.push_error(err);
+                    }
+                }
+                Ok(events) => self
+                    .driver
+                    .push_line(Definitions(&self.defines), Events(events)),
+            },
         }
     }
 
@@ -250,17 +336,7 @@ where
                         self.driver.push_error(f(span.clone()))
                     }
                     Ok((file, contents)) => {
-                        match parse::parse(
-                            &Source::File(Rc::new(file)),
-                            contents,
-                        ) {
-                            Ok(tree) => self.walk(&tree),
-                            Err(errs) => {
-                                for err in errs.into_iter() {
-                                    self.driver.push_error(err)
-                                }
-                            }
-                        }
+                        self.process(&Source::File(Rc::new(file)), contents, id)
                     }
                 }
             }
@@ -279,7 +355,7 @@ where
             Inctevent(exe, args) => {
                 let current_dir = extract_current_dir(span);
 
-                let s: Result<String, InctextErrorConverter<E>> =
+                let s: Result<_, InctextErrorConverter<E>> =
                     self.driver.request_process_run(
                         exe,
                         args,
@@ -297,7 +373,7 @@ where
                     Err(InctextErrorConverter(f)) => {
                         self.driver.push_error(f(span.clone()))
                     }
-                    Ok(contents) => {
+                    Ok((contents, source)) => {
                         // TODO: This error reporting is not good. We have no
                         // way of retrieving any information that would be
                         // useful for actually debugging the problem (e.g.,
@@ -309,17 +385,9 @@ where
                         // mark the span with driver-specific excess details,
                         // e.g. (the file location in the cache, the precise
                         // command line used to generate this file, etc).
-                        match parse::parse(&Source::Unknown, contents) {
-                            Ok(tree) => self.walk(&tree),
-                            Err(errs) => {
-                                for err in errs.into_iter() {
-                                    self.driver.push_error(E::inctext_error(
-                                        err,
-                                        span.clone(),
-                                    ))
-                                }
-                            }
-                        }
+                        self.process(&source, contents, move |e| {
+                            E::inctext_error(e, span.clone())
+                        })
                     }
                 }
             }
@@ -338,6 +406,301 @@ where
     }
 }
 
+enum Event {
+    Token(Token),
+    ExpandTo {
+        from: Option<(Rc<String>, Span)>,
+        body: Vec<TokenGroup>,
+    },
+}
+
+pub struct Events(Vec<Spanned<Event>>);
+
+pub fn expand_events_until_finished<E>(
+    Definitions(definitions): Definitions<'_>,
+    Events(events): Events,
+) -> Result<Vec<Spanned<Token>>, Vec<E>>
+where
+    E: ErrorHandler,
+{
+    expand_events(definitions, events, LinkedList::empty())
+}
+
+fn expand_events<E>(
+    definitions: &HashMap<String, Definition>,
+    events: Vec<Spanned<Event>>,
+    seen: LinkedList<String>,
+) -> Result<Vec<Spanned<Token>>, Vec<E>>
+where
+    E: ErrorHandler,
+{
+    let mut result = Vec::new();
+    let mut errs = Vec::new();
+
+    for spanned_event in events {
+        match expand_single_event(definitions, spanned_event, seen.clone()) {
+            Ok(toks) => result.extend(toks),
+            Err(es) => errs.extend(es),
+        }
+    }
+
+    if errs.is_empty() {
+        Ok(result)
+    } else {
+        Err(errs)
+    }
+}
+
+fn expand_single_event<E>(
+    definitions: &HashMap<String, Definition>,
+    (event, span): Spanned<Event>,
+    // Using a [LinkedList] here means that macro expansion is now quadratic
+    // in the number of nested macro invocations, but it should be fine; it's
+    // unlikely that we'll ever have to deal with a chain more than two digits
+    // long.
+    seen: LinkedList<String>,
+) -> Result<Vec<Spanned<Token>>, Vec<E>>
+where
+    E: ErrorHandler,
+{
+    let span = &span;
+
+    match event {
+        Event::Token(t) => Ok(vec![(t, span.clone())]),
+        Event::ExpandTo { from, body } => parse_events(
+            definitions,
+            &body
+                .into_iter()
+                .map(move |group| (group, span.clone()))
+                .collect(),
+        )
+        .and_then(|evts| match from {
+            Some((name, defn_site)) => {
+                if seen.iter().any(|s| *s == *name) {
+                    Err(vec![E::recursive_macro(
+                        name.as_ref(),
+                        defn_site.clone(),
+                        span.clone(),
+                    )])
+                } else {
+                    expand_events(
+                        definitions,
+                        evts,
+                        seen.cons(name.as_ref().to_owned()),
+                    )
+                }
+            }
+            None => expand_events(definitions, evts, seen),
+        }),
+    }
+}
+
+fn parse_events<E>(
+    definitions: &HashMap<String, Definition>,
+    tokens: &Vec<Spanned<TokenGroup>>,
+) -> Result<Vec<Spanned<Event>>, Vec<E>>
+where
+    E: ErrorHandler,
+{
+    let mut result = Vec::new();
+    let mut errs = Vec::new();
+
+    parse_events_impl(definitions, tokens, &mut result, &mut errs);
+
+    if errs.is_empty() {
+        Ok(result)
+    } else {
+        Err(errs)
+    }
+}
+
+fn parse_events_impl<E>(
+    definitions: &HashMap<String, Definition>,
+    tokens: &Vec<Spanned<TokenGroup>>,
+    result: &mut Vec<Spanned<Event>>,
+    errs: &mut Vec<E>,
+) where
+    E: ErrorHandler,
+{
+    let mut tokens = tokens.iter().peekable();
+
+    loop {
+        let (t, span) = match tokens.next() {
+            Some(elem) => elem,
+            None => break,
+        };
+
+        match t {
+            TokenGroup::Group { kind, members } => {
+                let (start, end) = kind.delimiters();
+                result.push((Event::Token(start), span.start_span()));
+                parse_events_impl(definitions, members, result, errs);
+                result.push((Event::Token(end), span.end_span()));
+            }
+            TokenGroup::Single((t @ Token::Ident(s), span)) => {
+                match definitions.get(&**s) {
+                    None | Some(Definition::Reserved) => {
+                        result.push((Event::Token(t.clone()), span.clone()))
+                    }
+                    Some(Definition::Empty(defn_span)) => {
+                        errs.push(E::expanded_empty_definition(
+                            defn_span.clone(),
+                            span.clone(),
+                        ))
+                    }
+                    Some(Definition::Rename(out, defn_site)) => result.push((
+                        (Event::ExpandTo {
+                            from: Some((s.clone(), defn_site.clone())),
+                            body: out.iter().map(|x| x.clone()).collect(),
+                        }),
+                        span.clone(),
+                    )),
+                    Some(Definition::Builtin(f)) => {
+                        match fetch_args(&mut tokens, &**s, None, span) {
+                            Ok((args, arg_span)) => result.push((
+                                Event::ExpandTo {
+                                    from: None,
+                                    body: f(args),
+                                },
+                                span.join(&arg_span),
+                            )),
+                            Err(e) => errs.push(e),
+                        }
+                    }
+                    Some(Definition::Macro(arg_names, body, defn_site)) => {
+                        match fetch_args(
+                            &mut tokens,
+                            &**s,
+                            Some(defn_site.clone()),
+                            span,
+                        ) {
+                            Err(e) => errs.push(e),
+                            Ok((args, arg_span)) => {
+                                let expected = arg_names.len();
+                                let received = args.len();
+
+                                if expected != received {
+                                    errs.push(E::wrong_number_of_arguments(
+                                        &**s,
+                                        expected,
+                                        received,
+                                        defn_site.clone(),
+                                        span.join(&arg_span),
+                                    ));
+
+                                    continue;
+                                }
+
+                                let args: HashMap<_, _> =
+                                    arg_names.iter().zip(args.iter()).collect();
+
+                                let expanded =
+                                    expand_body_single(&args, body, &span);
+
+                                result.push((
+                                    Event::ExpandTo {
+                                        from: Some((
+                                            s.clone(),
+                                            defn_site.clone(),
+                                        )),
+                                        body: expanded,
+                                    },
+                                    span.join(&arg_span),
+                                ))
+                            }
+                        }
+                    }
+                }
+            }
+            TokenGroup::Single((t, span)) => {
+                result.push((Event::Token(t.clone()), span.clone()))
+            }
+        }
+    }
+}
+
+fn expand_body_single(
+    args: &HashMap<&String, &Vec<TokenGroup>>,
+    body: &Vec<TokenGroup>,
+    span: &Span,
+) -> Vec<TokenGroup> {
+    body.iter()
+        .flat_map(|group| match group {
+            TokenGroup::Single((Token::Ident(s), span)) => match args.get(&**s)
+            {
+                None => {
+                    vec![TokenGroup::Single((
+                        Token::Ident(s.clone()),
+                        span.clone(),
+                    ))]
+                }
+                Some(ts) => ts.iter().map(|x| x.clone()).collect(),
+            },
+            t @ TokenGroup::Single(_) => {
+                vec![t.clone()]
+            }
+            TokenGroup::Group { kind, members } => vec![TokenGroup::Group {
+                kind: *kind,
+                members: expand_body_single(
+                    args,
+                    &members.iter().map(|(x, _)| x.clone()).collect(),
+                    span,
+                )
+                .iter()
+                .map(|x| (x.clone(), span.clone()))
+                .collect(),
+            }],
+        })
+        .collect()
+}
+
+fn fetch_args<E>(
+    tokens: &mut std::iter::Peekable<std::slice::Iter<Spanned<TokenGroup>>>,
+    s: &String,
+    defn_span: Option<Span>,
+    span: &Span,
+) -> Result<(Vec<Vec<TokenGroup>>, Span), E>
+where
+    E: ErrorHandler,
+{
+    let (arg_tokens, arg_span) = match tokens.peek() {
+        Some((
+            TokenGroup::Group {
+                kind: GroupKind::Paren,
+                members,
+            },
+            arg_span,
+        )) => (members, arg_span),
+        Some((_, next_span)) => {
+            return Err(E::macro_needs_arguments(
+                s,
+                defn_span,
+                span.join(next_span),
+            ));
+        }
+        None => {
+            return Err(E::macro_needs_arguments(s, defn_span, span.clone()));
+        }
+    };
+
+    let _ = tokens.next();
+
+    let mut args = Vec::new();
+    let mut current_arg = Vec::new();
+
+    for (member, _) in arg_tokens {
+        match member {
+            TokenGroup::Single((Token::Comma, _)) => {
+                args.push(current_arg);
+                current_arg = Vec::new();
+            }
+            member => current_arg.push(member.clone()),
+        }
+    }
+
+    Ok((args, arg_span.clone()))
+}
+
 fn lookup_symbol_for_rendering<E>(
     defines: &HashMap<String, Definition>,
     symbol: &String,
@@ -346,6 +709,13 @@ fn lookup_symbol_for_rendering<E>(
 where
     E: ErrorHandler,
 {
+    // XXX: this is hacky
+    match symbol.as_str() {
+        "__LINE__" => return (Some(format!("{}", span.start().row)), None),
+        "__FILE__" => return (Some(format!("{}", span.source())), None),
+        _ => (),
+    };
+
     match defines.get(symbol) {
         None => (None, None),
         Some(Definition::Empty(defn_site)) => (
@@ -383,39 +753,6 @@ fn extract_current_dir(span: &Span) -> Option<&Path> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SpanWithReason {
-    why: Rc<String>,
-    span: Span,
-}
-
-/// Tracks spans between macro invocations.
-// XXX: Should we also track between [#include]s?
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VerboseSpan {
-    /// The span representing the original user text corresponding to this
-    /// span.
-    user_span: Span,
-    /// A stack of spans corresponding to the macros expanded while processing
-    /// this span.
-    expansions: LinkedList<SpanWithReason>,
-}
-
-impl From<Span> for VerboseSpan {
-    fn from(user_span: Span) -> Self {
-        Self {
-            user_span,
-            expansions: LinkedList::empty(),
-        }
-    }
-}
-
-pub type VerboseSpanned<T> = (T, VerboseSpan);
-
-pub fn mark_verbose<T>((t, span): Spanned<T>) -> VerboseSpanned<T> {
-    (t, VerboseSpan::from(span))
-}
-
 struct IncludeErrorConverter<E>(Box<dyn FnOnce(Span) -> E>);
 
 impl<E> IOErrorHandler for IncludeErrorConverter<E>
@@ -451,44 +788,5 @@ where
         InctextErrorConverter(Box::new(move |span| {
             E::ambiguous_external_program(found, span)
         }))
-    }
-}
-
-struct IteratorStack<T>(Vec<Box<dyn Iterator<Item = T>>>);
-
-impl<T> IteratorStack<T> {
-    fn new<I>(iter: I) -> Self
-    where
-        I: Iterator<Item = T> + 'static,
-    {
-        Self(vec![Box::new(iter)])
-    }
-
-    fn push_iter<I>(&mut self, iter: I)
-    where
-        I: Iterator<Item = T> + 'static,
-    {
-        let Self(inner) = self;
-
-        inner.push(Box::new(iter));
-    }
-}
-
-impl<T> Iterator for IteratorStack<T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let Self(inner) = self;
-
-        let top = inner.last_mut()?;
-
-        match top.next() {
-            Some(t) => return Some(t),
-            None => (),
-        };
-
-        inner.pop();
-
-        self.next()
     }
 }
