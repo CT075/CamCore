@@ -33,9 +33,9 @@ Ok(
                                     "test.event",
                                 ),
                                 span: Position {
-                                    offset: 0,
+                                    offset: 5,
                                     row: 0,
-                                    col: 0,
+                                    col: 5,
                                 }..Position {
                                     offset: 7,
                                     row: 0,

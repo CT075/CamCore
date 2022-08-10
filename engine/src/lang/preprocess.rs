@@ -94,7 +94,7 @@ fn builtins() -> HashMap<String, Definition> {
     .collect()
 }
 
-pub fn drive<E, D>(driver: D, file: impl AsRef<Path>, contents: String)
+pub fn drive<E, D>(driver: D, file: impl AsRef<Path>, contents: String) -> D
 where
     E: ErrorHandler + parse::ErrorHandler,
     D: Driver<E>,
@@ -109,7 +109,9 @@ where
         &Source::File(Rc::new(file.as_ref().to_path_buf())),
         contents,
         id,
-    )
+    );
+
+    context.driver
 }
 
 pub struct Definitions<'a>(&'a HashMap<String, Definition>);
@@ -701,6 +703,10 @@ where
             }
             member => current_arg.push(member.clone()),
         }
+    }
+
+    if !current_arg.is_empty() {
+        args.push(current_arg);
     }
 
     Ok((args, arg_span.clone()))

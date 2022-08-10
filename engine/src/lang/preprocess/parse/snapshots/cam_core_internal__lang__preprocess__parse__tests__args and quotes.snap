@@ -20,21 +20,21 @@ Ok(
                                 (
                                     Single(
                                         (
-                                            QuotedString(
-                                                "B C",
+                                            Ident(
+                                                "B",
                                             ),
                                             Span {
                                                 source: File(
                                                     "test.event",
                                                 ),
                                                 span: Position {
-                                                    offset: 16,
+                                                    offset: 17,
                                                     row: 0,
-                                                    col: 16,
+                                                    col: 17,
                                                 }..Position {
-                                                    offset: 21,
+                                                    offset: 18,
                                                     row: 0,
-                                                    col: 21,
+                                                    col: 18,
                                                 },
                                             },
                                         ),
@@ -44,13 +44,50 @@ Ok(
                                             "test.event",
                                         ),
                                         span: Position {
-                                            offset: 15,
+                                            offset: 17,
                                             row: 0,
-                                            col: 15,
+                                            col: 17,
                                         }..Position {
-                                            offset: 21,
+                                            offset: 19,
                                             row: 0,
-                                            col: 21,
+                                            col: 19,
+                                        },
+                                    },
+                                ),
+                                (
+                                    Single(
+                                        (
+                                            Ident(
+                                                "C",
+                                            ),
+                                            Span {
+                                                source: File(
+                                                    "test.event",
+                                                ),
+                                                span: Position {
+                                                    offset: 19,
+                                                    row: 0,
+                                                    col: 19,
+                                                }..Position {
+                                                    offset: 20,
+                                                    row: 0,
+                                                    col: 20,
+                                                },
+                                            },
+                                        ),
+                                    ),
+                                    Span {
+                                        source: File(
+                                            "test.event",
+                                        ),
+                                        span: Position {
+                                            offset: 19,
+                                            row: 0,
+                                            col: 19,
+                                        }..Position {
+                                            offset: 20,
+                                            row: 0,
+                                            col: 20,
                                         },
                                     },
                                 ),

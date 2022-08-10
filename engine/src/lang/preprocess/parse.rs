@@ -322,7 +322,7 @@ where
         .map(|(then, else_)| (then, else_.unwrap_or(Tree(vec![]))))
 }
 
-// XXX: This function doesn't quite handle nested quotes in defines properly.
+// XXX: Quotes are the actual bane of my existence.
 fn define<E>() -> impl Parser<char, Directive, Error = Carrier<char, E>> + Clone
 where
     E: ErrorHandler,
@@ -396,6 +396,7 @@ where
         .or_not();
 
     header
+        .then_ignore(token_separator())
         .then(body)
         .map(|((name, args), body)| match body {
             None => Directive::Define(name, args, MacroBody::Empty),
@@ -709,7 +710,7 @@ where
 
     let line = line().map(Node::Line);
 
-    choice((message, directive, line))
+    token_separator().ignore_then(choice((message, directive, line)))
 }
 
 pub fn tree<E>() -> impl Parser<char, Tree, Error = Carrier<char, E>> + Clone

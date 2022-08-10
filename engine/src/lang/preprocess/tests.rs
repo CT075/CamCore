@@ -16,84 +16,85 @@ enum E {
     RecursiveMacro(String, Span, Span),
     WrongNumberOfArguments(String, usize, usize, Span, Span),
     MacroNeedsArguments(String, Option<Span>, Span),
+    ParseError(Span),
 }
 
 impl GenericParseErrorHandler<char> for E {
     fn expected(
-        _span: Span,
+        span: Span,
         _expected: HashSet<Option<char>>,
         _found: Option<char>,
     ) -> Self {
-        panic!("parse error")
+        Self::ParseError(span)
     }
 
     fn unclosed_delimiter(
-        _span: Span,
+        span: Span,
         _: char,
         _expected: char,
         _found: Option<char>,
     ) -> Self {
-        panic!("parse error")
+        Self::ParseError(span)
     }
 }
 
 impl types::string_with_vars::ParseErrorHandler for E {
     fn bad_post_percent(span: Span) -> Self {
-        panic!("swv parse error")
+        Self::ParseError(span)
     }
 
     fn bad_identifier(span: Span) -> Self {
-        panic!("swv parse error")
+        Self::ParseError(span)
     }
 
     fn unclosed_var(span: Span) -> Self {
-        panic!("swv parse error")
+        Self::ParseError(span)
     }
 }
 
 impl parse::ErrorHandler for E {
     fn unclosed_comment(span: Span) -> Self {
-        panic!("parse error")
+        Self::ParseError(span)
     }
 
     fn unclosed_quotes(span: Span) -> Self {
-        panic!("parse error")
+        Self::ParseError(span)
     }
 
     fn bad_directive(span: Span) -> Self {
-        panic!("parse error")
+        Self::ParseError(span)
     }
 
-    fn expected_end_of_line(why: &'static str, span: Span) -> Self {
-        panic!("parse error")
+    fn expected_end_of_line(_why: &'static str, span: Span) -> Self {
+        Self::ParseError(span)
     }
 
-    fn unclosed_if(which: &'static str, span: Span) -> Self {
-        panic!("parse error")
+    fn unclosed_if(_which: &'static str, span: Span) -> Self {
+        Self::ParseError(span)
     }
 
     fn define_duplicate_arg(span: Span) -> Self {
-        panic!("parse error")
+        Self::ParseError(span)
     }
 
     fn define_unmatched_start_quote(span: Span) -> Self {
-        panic!("parse error")
+        Self::ParseError(span)
     }
 
     fn define_unmatched_end_quote(span: Span) -> Self {
-        panic!("parse error")
+        Self::ParseError(span)
     }
 
     fn unmatched_else(span: Span) -> Self {
-        panic!("parse error")
+        Self::ParseError(span)
     }
 
     fn unmatched_endif(span: Span) -> Self {
-        panic!("parse error")
+        Self::ParseError(span)
     }
 
     fn unmatched_paren(span: Span) -> Self {
-        panic!("parse error")
+        Self::ParseError(span)
     }
 }
 
@@ -114,19 +115,19 @@ impl ErrorHandler for E {
         Self::UndefNotDefined(ident.clone(), span)
     }
 
-    fn pool_unimplemented(_span: Span) -> Self {
-        panic!("pool unimplemented")
+    fn pool_unimplemented(span: Span) -> Self {
+        Self::ParseError(span)
     }
 
-    fn ambiguous_include_file(_candidates: Vec<PathBuf>, _span: Span) -> Self {
-        panic!("ambiguous include file")
+    fn ambiguous_include_file(_candidates: Vec<PathBuf>, span: Span) -> Self {
+        Self::ParseError(span)
     }
 
     fn ambiguous_external_program(
         _candidates: Vec<PathBuf>,
-        _span: Span,
+        span: Span,
     ) -> Self {
-        panic!("ambiguous external program")
+        Self::ParseError(span)
     }
 
     fn expanded_empty_definition(
@@ -180,14 +181,14 @@ impl ErrorHandler for E {
         Self::MacroNeedsArguments(macro_name.clone(), definition_site, span)
     }
 
-    fn io_error(_underlying: std::io::Error, _span: Span) -> Self {
-        panic!("io error")
+    fn io_error(_underlying: std::io::Error, span: Span) -> Self {
+        Self::ParseError(span)
     }
 }
 
 impl types::string_with_vars::RenderErrorHandler for E {
-    fn unknown_var(v: String, span: Span) -> Self {
-        panic!("string_with_vars::render")
+    fn unknown_var(_v: String, span: Span) -> Self {
+        Self::ParseError(span)
     }
 }
 
@@ -206,7 +207,7 @@ impl Driver<E> for TestDriver {
         &mut self,
         msg: &StringWithVars,
         lookup_symbol: impl Fn(&String) -> (Option<String>, Option<E>),
-        span: Span,
+        _span: Span,
     ) {
         let rendered: Result<String, Vec<E>> = msg.render(lookup_symbol);
 
@@ -240,7 +241,9 @@ impl Driver<E> for TestDriver {
         self.errors.push(err)
     }
 
-    fn register_symbol(&mut self, symbol: String, span: Span) {}
+    fn register_symbol(&mut self, _symbol: String, _span: Span) {
+        // nothing to do
+    }
 
     fn push_binary_file(
         &mut self,
@@ -316,4 +319,72 @@ impl Driver<E> for TestDriver {
             Some(f) => Ok((f(args_rendered), Source::Unknown)),
         }
     }
+}
+
+impl TestDriver {
+    fn new(
+        files_in_tree: HashMap<PathBuf, String>,
+        executables: HashMap<PathBuf, Box<dyn Fn(Vec<String>) -> String>>,
+    ) -> Self {
+        Self {
+            files_in_tree,
+            executables,
+            errors: Vec::new(),
+            messages: Vec::new(),
+            lines: Vec::new(),
+        }
+    }
+
+    fn pp(&self) -> String {
+        let mut result = String::new();
+
+        result.push_str("ERRORS:\n");
+        for e in self.errors.iter() {
+            result.push_str(format!("  {:?}\n", e).as_str());
+        }
+
+        result.push_str("\n\nMESSAGES:\n");
+        for m in self.messages.iter() {
+            result.push_str(format!("  {}\n", m).as_str());
+        }
+
+        result.push_str("\n\nOUTPUT:\n");
+        for line in self.lines.iter() {
+            result.push_str(" ");
+            for token in line {
+                result.push_str(format!(" {}", token).as_str());
+            }
+            result.push_str("\n")
+        }
+
+        result
+    }
+}
+
+fn run_test(
+    input: &'static str,
+    files_in_tree: HashMap<PathBuf, String>,
+    executables: HashMap<PathBuf, Box<dyn Fn(Vec<String>) -> String>>,
+) -> String {
+    let driver = TestDriver::new(files_in_tree, executables);
+
+    drive(driver, "TEST_INPUT", input.to_string()).pp()
+}
+
+#[test]
+fn e2e_basic() {
+    let input = r#"
+    #define foo(b) "bar(b)"
+    #define bar(a) "baz a A"
+
+    foo(whee)
+
+    #define A B
+
+    foo(whoo)
+    "#;
+
+    let output = run_test(input, HashMap::new(), HashMap::new());
+
+    insta::assert_display_snapshot!("e2e_basic", output)
 }
