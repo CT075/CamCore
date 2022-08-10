@@ -34,6 +34,7 @@ use super::syntax::{
     TokenGroup, Tree,
 };
 
+// TODO: adjust these to include [VerboseContext] or something where necessary
 pub trait ErrorHandler: 'static {
     fn defined_with_args_but_no_body(span: Span) -> Self;
 
@@ -386,12 +387,6 @@ where
                         // useful for actually debugging the problem (e.g.,
                         // the actual command line used to generate the code
                         // or a location in the cache containing the file).
-                        //
-                        // One way to fix this would be to have [driver]
-                        // provide some associated [Details] type. Then, we could
-                        // mark the span with driver-specific excess details,
-                        // e.g. (the file location in the cache, the precise
-                        // command line used to generate this file, etc).
                         self.process(&source, contents, move |e| {
                             E::inctext_error(e, span.clone())
                         })
