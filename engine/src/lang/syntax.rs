@@ -18,7 +18,6 @@ pub enum Token {
     QuotedString(String),
     Colon,
     Dash,
-    Emdash,
     Semi,
     Slash,
     Star,
@@ -100,7 +99,7 @@ pub enum Directive {
 #[derive(Debug, Clone)]
 pub struct Tree(pub Vec<Spanned<Node>>);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operator {
     Add,
     Minus,
@@ -114,18 +113,25 @@ pub enum Operator {
     ShiftRight,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     Literal(i32),
     Var(Rc<String>),
     Binop(Operator, Box<Expr>, Box<Expr>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Argument {
+    Single(Expr),
+    List(Vec<Spanned<Expr>>),
+    Tuple(Vec<Spanned<Expr>>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
-    Line {
+    Instruction {
         head: Rc<String>,
-        args: Vec<Spanned<Expr>>,
+        args: Vec<Spanned<Argument>>,
     },
     Label(Rc<String>),
 }

@@ -42,7 +42,7 @@ pub trait GenericParseErrorHandler<I: std::hash::Hash + Eq>: Sized {
 
 impl<I, E> Carrier<I, E>
 where
-    I: PartialEq + Eq + std::hash::Hash + Clone + Copy,
+    I: PartialEq + Eq + std::hash::Hash + Clone,
     E: GenericParseErrorHandler<I>,
 {
     pub fn generic_parse_error<Iter>(
@@ -90,14 +90,14 @@ where
                 },
             ) => {
                 for c in expected_ {
-                    expected.insert(*c);
+                    expected.insert(c.clone());
                 }
             }
             (
                 GenericParseError { expected, .. },
                 GenericUnclosedDelimiter { expected: c, .. },
             ) => {
-                expected.insert(Some(*c));
+                expected.insert(Some(c.clone()));
             }
         }
 

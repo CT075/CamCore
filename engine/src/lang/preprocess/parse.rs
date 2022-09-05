@@ -610,7 +610,6 @@ where
         number.map(|(payload, radix)| Token::Number { payload, radix }),
         quoted_string.map(Token::QuotedString),
         just(':').to(Token::Colon),
-        just("--").to(Token::Emdash),
         just('-').to(Token::Dash),
         just('/')
             .then_ignore(none_of("/").rewind())

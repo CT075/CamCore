@@ -4,3 +4,6 @@
 // good LHF fix would be to clean these up.
 
 pub mod common;
+mod core;
+
+pub use self::core::parse_line;

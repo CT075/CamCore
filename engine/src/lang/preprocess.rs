@@ -152,7 +152,12 @@ pub trait Driver<E: ErrorHandler> {
     /// from this module to flatten the line into its constituent tokens. This
     /// is to ensure that the driver doesn't lose context on the original user
     /// input while parsing, which will help error granularity.
-    fn push_line<'a>(&'a mut self, definitions: Definitions<'a>, line: Events);
+    fn push_line<'a>(
+        &'a mut self,
+        definitions: Definitions<'a>,
+        line: Events,
+        original_line: &'a Vec<TokenGroup>,
+    );
 
     /// Push a preprocessing error to the driver.
     fn push_error(&mut self, err: E);
@@ -283,9 +288,11 @@ where
                         self.driver.push_error(err);
                     }
                 }
-                Ok(events) => self
-                    .driver
-                    .push_line(Definitions(&self.defines), Events(events)),
+                Ok(events) => self.driver.push_line(
+                    Definitions(&self.defines),
+                    Events(events),
+                    &line.iter().map(|(group, _)| group.clone()).collect(),
+                ),
             },
         }
     }

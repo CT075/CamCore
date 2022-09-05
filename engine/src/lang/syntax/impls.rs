@@ -17,7 +17,6 @@ impl std::fmt::Display for Token {
             QuotedString(s) => write!(f, r#""{}""#, s),
             Colon => write!(f, ":"),
             Dash => write!(f, "-"),
-            Emdash => write!(f, "--"),
             Semi => write!(f, ";"),
             Slash => write!(f, "/"),
             Star => write!(f, "*"),

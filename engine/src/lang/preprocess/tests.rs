@@ -221,7 +221,12 @@ impl Driver<E> for TestDriver {
         }
     }
 
-    fn push_line<'a>(&'a mut self, definitions: Definitions<'a>, line: Events) {
+    fn push_line<'a>(
+        &'a mut self,
+        definitions: Definitions<'a>,
+        line: Events,
+        _original_line: &'a Vec<TokenGroup>,
+    ) {
         let expanded: Result<_, Vec<E>> =
             expand_events_until_finished(definitions, line);
 
