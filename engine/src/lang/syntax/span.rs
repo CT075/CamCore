@@ -1,32 +1,52 @@
-use std::{default::Default, ops::Range, rc::Rc};
+// XXX: This probably doesn't belong under [lang].
+
+use std::{
+    default::Default,
+    ops::Range,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use crate::types::hkt::{Apply, Functor, Witness};
 
-// XXX CHORE: Instead of this, we could use a real global string interner with
-// [lazy_static]
+// XXX CHORE: Instead of using [Rc], we could use a real global string interner
+// with [lazy_static]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Source(Rc<String>);
-
-const DUMMY_SOURCE: &'static str = "_unknown_";
+pub enum Source {
+    Unknown,
+    File(Rc<PathBuf>),
+}
 
 impl Source {
-    pub fn new(s: impl AsRef<str>) -> Self {
-        Source(Rc::new(s.as_ref().to_owned()))
+    pub fn new(p: impl AsRef<Path>) -> Self {
+        Source::File(Rc::new(p.as_ref().to_owned()))
     }
 }
 
 impl Default for Source {
     fn default() -> Self {
-        Self::new(DUMMY_SOURCE.to_owned())
+        Self::Unknown
+    }
+}
+
+impl std::fmt::Display for Source {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
+        match self {
+            Self::Unknown => write!(f, "_unknown_"),
+            Self::File(fname) => write!(f, "{}", fname.display()),
+        }
     }
 }
 
 // XXX: This entire song and dance is necessary to support [__LINE__],
-// [__COL__] and [__FILE__]. For error-reporting, all we actually need is
+// [__COL__] and [__FILE__]. For error reporting, all we actually need is
 // [offset] -- the error rendering library will recompute [row] and [col]
 // anyway. It would be great if we could just use [Span = (Source, Range<usize>)]
 // and call it a day.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Position {
     pub offset: usize,
     pub row: usize,
@@ -46,6 +66,54 @@ impl Span {
 
     pub fn start(&self) -> &Position {
         &self.span.start
+    }
+
+    pub fn end(&self) -> &Position {
+        &self.span.end
+    }
+
+    // XXX: this panics. we could avoid that by having the preprocessor track
+    // the source (rather than this type).
+    pub fn join(&self, other: &Self) -> Self {
+        let start = self.start();
+        let end = other.end();
+
+        if self.source() != other.source() {
+            panic!(
+                "BUG: nonsensical [Span::join] between different source files"
+            )
+        }
+
+        Span {
+            source: self.source.clone(),
+            span: *start..*end,
+        }
+    }
+
+    pub fn start_span(&self) -> Self {
+        let start @ Position { offset, row, col } = self.start();
+
+        Span {
+            source: self.source.clone(),
+            span: *start..Position {
+                offset: offset + 1,
+                row: *row,
+                col: col + 1,
+            },
+        }
+    }
+
+    pub fn end_span(&self) -> Self {
+        let end @ Position { offset, row, col } = self.end();
+
+        Span {
+            source: self.source.clone(),
+            span: Position {
+                offset: offset - 1,
+                row: *row,
+                col: col - 1,
+            }..*end,
+        }
     }
 }
 
@@ -84,7 +152,7 @@ impl chumsky::span::Span for Span {
 
 pub type Spanned<T> = (T, Span);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SpannedW {}
 
 impl<T> Witness<T> for SpannedW {

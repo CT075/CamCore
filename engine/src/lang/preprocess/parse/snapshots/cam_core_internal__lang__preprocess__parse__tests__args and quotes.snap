@@ -1,5 +1,5 @@
 ---
-source: backend/src/lang/preprocess/parse/tests.rs
+source: engine/src/lang/preprocess/parse/tests.rs
 expression: "parse(r#\"#define A(B, C) \"B C\"\"#)"
 ---
 Ok(
@@ -20,37 +20,74 @@ Ok(
                                 (
                                     Single(
                                         (
-                                            QuotedString(
-                                                "B C",
+                                            Ident(
+                                                "B",
                                             ),
                                             Span {
-                                                source: Source(
+                                                source: File(
                                                     "test.event",
                                                 ),
                                                 span: Position {
-                                                    offset: 16,
+                                                    offset: 17,
                                                     row: 0,
-                                                    col: 16,
+                                                    col: 17,
                                                 }..Position {
-                                                    offset: 21,
+                                                    offset: 18,
                                                     row: 0,
-                                                    col: 21,
+                                                    col: 18,
                                                 },
                                             },
                                         ),
                                     ),
                                     Span {
-                                        source: Source(
+                                        source: File(
                                             "test.event",
                                         ),
                                         span: Position {
-                                            offset: 15,
+                                            offset: 17,
                                             row: 0,
-                                            col: 15,
+                                            col: 17,
                                         }..Position {
-                                            offset: 21,
+                                            offset: 19,
                                             row: 0,
-                                            col: 21,
+                                            col: 19,
+                                        },
+                                    },
+                                ),
+                                (
+                                    Single(
+                                        (
+                                            Ident(
+                                                "C",
+                                            ),
+                                            Span {
+                                                source: File(
+                                                    "test.event",
+                                                ),
+                                                span: Position {
+                                                    offset: 19,
+                                                    row: 0,
+                                                    col: 19,
+                                                }..Position {
+                                                    offset: 20,
+                                                    row: 0,
+                                                    col: 20,
+                                                },
+                                            },
+                                        ),
+                                    ),
+                                    Span {
+                                        source: File(
+                                            "test.event",
+                                        ),
+                                        span: Position {
+                                            offset: 19,
+                                            row: 0,
+                                            col: 19,
+                                        }..Position {
+                                            offset: 20,
+                                            row: 0,
+                                            col: 20,
                                         },
                                     },
                                 ),
@@ -59,7 +96,7 @@ Ok(
                     ),
                 ),
                 Span {
-                    source: Source(
+                    source: File(
                         "test.event",
                     ),
                     span: Position {

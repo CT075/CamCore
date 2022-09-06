@@ -22,7 +22,7 @@ mod tests;
 
 // This needs to be ['static] to make some of the recursive parsers work, and
 // is probably good practice anyways.
-pub trait PpSyntaxErrorHandler:
+pub trait ErrorHandler:
     GenericParseErrorHandler<char> + string_with_vars::ParseErrorHandler + 'static
 {
     fn unclosed_comment(span: Span) -> Self;
@@ -57,7 +57,7 @@ pub enum PpSyntaxKind {
 
 impl<E> ChumskyError<char> for Carrier<char, E>
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     type Span = Span;
     type Label = PpSyntaxKind;
@@ -121,7 +121,7 @@ where
 
 fn line_comment<E>() -> impl Parser<char, (), Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     just("//")
         .then(take_until(
@@ -147,7 +147,7 @@ where
 // way to do this using the [nested_delimiters] recovery strategy.
 fn block_comment<E>() -> impl Parser<char, (), Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     let line_comment = line_comment();
 
@@ -183,7 +183,7 @@ where
 fn rest_of_line<E>(
 ) -> impl Parser<char, String, Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     choice((
         block_comment().to(None),
@@ -206,7 +206,7 @@ where
 fn non_nl_whitespace<E>(
 ) -> impl Parser<char, char, Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     filter(move |c: &char| c.is_whitespace() && *c != '\n')
 }
@@ -220,7 +220,7 @@ fn parse_string_with_vars<E, F>(
     fail: &mut F,
 ) -> StringWithVars
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
     F: FnMut(Carrier<char, E>) -> () + ?Sized,
 {
     match StringWithVars::parse(Some(span.source()), Some(span.start()), &s) {
@@ -240,7 +240,7 @@ fn command_line<E>() -> impl Parser<
     Error = Carrier<char, E>,
 > + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     let prog = path().padded_by(non_nl_whitespace());
 
@@ -268,7 +268,7 @@ where
 fn path<E>(
 ) -> impl Parser<char, RelativePathBuf, Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     just('"')
         .ignored()
@@ -309,7 +309,7 @@ fn if_<E>(
     tree: impl Parser<char, Tree, Error = Carrier<char, E>> + Clone,
 ) -> impl Parser<char, (Tree, Tree), Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     tree.clone()
         .then(
@@ -322,10 +322,10 @@ where
         .map(|(then, else_)| (then, else_.unwrap_or(Tree(vec![]))))
 }
 
-// XXX: This function doesn't quite handle nested quotes in defines properly.
+// XXX: Quotes are the actual bane of my existence.
 fn define<E>() -> impl Parser<char, Directive, Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     let header = text::ident()
         .then_ignore(token_separator())
@@ -396,6 +396,7 @@ where
         .or_not();
 
     header
+        .then_ignore(token_separator())
         .then(body)
         .map(|((name, args), body)| match body {
             None => Directive::Define(name, args, MacroBody::Empty),
@@ -410,7 +411,7 @@ fn directive<E>(
     tree: impl Parser<char, Tree, Error = Carrier<char, E>> + Clone,
 ) -> impl Parser<char, Directive, Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     just('#').ignore_then(
         choice((
@@ -494,7 +495,7 @@ where
 fn number<E>(
 ) -> impl Parser<char, (String, usize), Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     // We can't use [text::int], because that function doesn't quite have the
     // error handling properties we want. Instead, we collect all identifier
@@ -526,7 +527,7 @@ where
 fn quoted_string<E>(
 ) -> impl Parser<char, String, Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     let escape = just('\\').ignore_then(choice((
         just('\\'),
@@ -559,7 +560,7 @@ where
 fn token_separator<E>(
 ) -> impl Parser<char, (), Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     block_comment()
         .or(just('\\').ignore_then(just('\n')).ignored())
@@ -585,7 +586,7 @@ where
 // ```
 fn end_of_line<E>() -> impl Parser<char, (), Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     filter(move |c: &char| c.is_whitespace() && *c != '\n')
         .ignored()
@@ -598,7 +599,7 @@ where
 
 fn token<E>() -> impl Parser<char, Token, Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     let ident = text::ident();
     let number = number();
@@ -609,7 +610,6 @@ where
         number.map(|(payload, radix)| Token::Number { payload, radix }),
         quoted_string.map(Token::QuotedString),
         just(':').to(Token::Colon),
-        just("--").to(Token::Emdash),
         just('-').to(Token::Dash),
         just('/')
             .then_ignore(none_of("/").rewind())
@@ -643,7 +643,7 @@ fn delimited_group_parser<E>(
     kind: GroupKind,
 ) -> impl Parser<char, TokenGroup, Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     token_group
         .clone()
@@ -656,7 +656,7 @@ where
 fn token_group<E>(
 ) -> impl Parser<char, TokenGroup, Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     recursive(|toks| {
         choice((
@@ -672,7 +672,7 @@ where
 fn line<E>(
 ) -> impl Parser<char, Vec<Spanned<TokenGroup>>, Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     token_group()
         .map_with_span(id2)
@@ -684,7 +684,7 @@ fn node<E>(
     tree: impl Parser<char, Tree, Error = Carrier<char, E>> + Clone,
 ) -> impl Parser<char, Node, Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     let message = just("MESSAGE")
         .padded_by(non_nl_whitespace().repeated())
@@ -709,12 +709,12 @@ where
 
     let line = line().map(Node::Line);
 
-    choice((message, directive, line))
+    token_separator().ignore_then(choice((message, directive, line)))
 }
 
 pub fn tree<E>() -> impl Parser<char, Tree, Error = Carrier<char, E>> + Clone
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
     recursive(|tree| {
         node(tree)
@@ -726,11 +726,16 @@ where
 
 pub fn parse<E>(source: &Source, s: impl AsRef<str>) -> Result<Tree, Vec<E>>
 where
-    E: PpSyntaxErrorHandler,
+    E: ErrorHandler,
 {
-    // This is a huge hack. Currently, chumsky does not handle repetition of
-    // things like "end of line or end of input" very well, so we force an
-    // end-of-line at the end of the input.
+    // This is a huge hack. [line] explicitly looks for a newline, which
+    // doesn't interact well with the end of the input. To fix this, we append
+    // a newline to the input, because chumsky doesn't handle repetition of
+    // "end of input" very well.
+    //
+    // One way around this might be to use [separated_by] somehow, but using
+    // this combinator is difficult if there are block comments in inconvenient
+    // places.
     let mut s: String = s.as_ref().to_owned();
     s.push('\n');
     let s = s;

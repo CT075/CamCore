@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::lang::syntax::{Span, Spanned};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -22,34 +20,46 @@ pub trait RenderErrorHandler {
 }
 
 impl S {
-    pub fn render<E>(
-        self,
-        context: &HashMap<String, String>,
+    pub fn render<E, Stringy>(
+        &self,
+        lookup: impl Fn(&String) -> (Option<Stringy>, Option<E>),
     ) -> Result<String, Vec<E>>
     where
         E: RenderErrorHandler,
+        Stringy: AsRef<str>,
     {
         let mut out = String::new();
 
-        self.render_into(context, &mut out).map(|_| out)
+        self.render_into(lookup, &mut out).map(|_| out)
     }
 
-    pub fn render_into<'a, 'b, E>(
-        self,
-        context: &'a HashMap<String, String>,
+    pub fn render_into<'a, 'b, E, Stringy>(
+        &self,
+        lookup: impl Fn(&String) -> (Option<Stringy>, Option<E>),
         out: &'b mut String,
     ) -> Result<(), Vec<E>>
     where
         E: RenderErrorHandler,
+        Stringy: AsRef<str>,
     {
         let mut errors = Vec::new();
 
-        for item in self.0 {
+        for item in self.0.iter() {
             match item {
                 Element::Text(s) => out.push_str(s.as_ref()),
-                Element::Var((v, span)) => match context.get(&v) {
-                    Some(val) => out.push_str(val.as_ref()),
-                    None => errors.push(E::unknown_var(v.clone(), span)),
+                Element::Var((v, span)) => match lookup(&v) {
+                    (Some(val), None) => out.push_str(val.as_ref()),
+                    (Some(val), Some(e)) => {
+                        errors.push(e);
+                        out.push_str(val.as_ref());
+                    }
+                    (None, Some(e)) => {
+                        errors.push(e);
+                        errors.push(E::unknown_var(v.clone(), span.clone()));
+                    }
+                    (None, None) => {
+                        errors.push(E::unknown_var(v.clone(), span.clone()))
+                    }
                 },
             }
         }
@@ -190,7 +200,7 @@ mod tests {
         let result: Result<_, Vec<E>> = parse(s);
 
         let span = Span {
-            source: Source::new("_unknown_"),
+            source: Source::Unknown,
             span: Position {
                 offset: 25,
                 row: 0,
@@ -245,11 +255,12 @@ mod tests {
 
         let s = parse(s)?;
 
-        let result = s.render(
-            &vec![("world".to_string(), "world".to_string())]
-                .into_iter()
-                .collect(),
-        )?;
+        let world = "world".to_owned();
+
+        let result = s.render(|k| match k.as_str() {
+            "world" => (Some(&world), None),
+            _ => (None, None),
+        })?;
 
         assert_eq!(result, "hello, world!".to_string());
 

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, path::PathBuf, str::FromStr};
 
 use super::*;
 use crate::lang::parse::common::GenericParseErrorHandler;
@@ -59,7 +59,7 @@ impl string_with_vars::ParseErrorHandler for Error {
     }
 }
 
-impl PpSyntaxErrorHandler for Error {
+impl super::ErrorHandler for Error {
     fn unclosed_comment(span: Span) -> Self {
         Self::UnclosedComment(span)
     }
@@ -110,7 +110,11 @@ fn run_parser<O>(
     text: &'static str,
 ) -> Result<O, Vec<Error>> {
     parser
-        .parse(stream_spanned(Some(&Source::new("test")), None, text))
+        .parse(stream_spanned(
+            Some(&Source::new(PathBuf::from_str("test").unwrap())),
+            None,
+            text,
+        ))
         .map_err(|errs| errs.into_iter().map(Carrier::into).collect())
 }
 
@@ -217,7 +221,7 @@ fn block_comment_basic_unclosed() {
         [
             UnclosedComment(
                 Span {
-                    source: Source(
+                    source: File(
                         "test",
                     ),
                     span: Position {
@@ -250,7 +254,7 @@ fn block_comment_nested_unclosed() {
         [
             UnclosedComment(
                 Span {
-                    source: Source(
+                    source: File(
                         "test",
                     ),
                     span: Position {
@@ -379,7 +383,7 @@ fn quoted_string_unclosed() {
         [
             UnclosedQuotes(
                 Span {
-                    source: Source(
+                    source: File(
                         "test",
                     ),
                     span: Position {
@@ -464,7 +468,7 @@ fn bad_directive() {
         [
             BadDirective(
                 Span {
-                    source: Source(
+                    source: File(
                         "test.event",
                     ),
                     span: Position {
@@ -499,7 +503,7 @@ some/text/on/a/new/line"#
                         ),
                     ),
                     Span {
-                        source: Source(
+                        source: File(
                             "test.event",
                         ),
                         span: Position {
@@ -538,7 +542,7 @@ fn midline_multiline_comment() {
                                             "A",
                                         ),
                                         Span {
-                                            source: Source(
+                                            source: File(
                                                 "test.event",
                                             ),
                                             span: Position {
@@ -554,7 +558,7 @@ fn midline_multiline_comment() {
                                     ),
                                 ),
                                 Span {
-                                    source: Source(
+                                    source: File(
                                         "test.event",
                                     ),
                                     span: Position {
@@ -575,7 +579,7 @@ fn midline_multiline_comment() {
                                             "B",
                                         ),
                                         Span {
-                                            source: Source(
+                                            source: File(
                                                 "test.event",
                                             ),
                                             span: Position {
@@ -591,7 +595,7 @@ fn midline_multiline_comment() {
                                     ),
                                 ),
                                 Span {
-                                    source: Source(
+                                    source: File(
                                         "test.event",
                                     ),
                                     span: Position {
@@ -608,7 +612,7 @@ fn midline_multiline_comment() {
                         ],
                     ),
                     Span {
-                        source: Source(
+                        source: File(
                             "test.event",
                         ),
                         span: Position {
@@ -646,7 +650,7 @@ NewChName:"#), @r###"
                                             "ALIGN",
                                         ),
                                         Span {
-                                            source: Source(
+                                            source: File(
                                                 "test.event",
                                             ),
                                             span: Position {
@@ -662,7 +666,7 @@ NewChName:"#), @r###"
                                     ),
                                 ),
                                 Span {
-                                    source: Source(
+                                    source: File(
                                         "test.event",
                                     ),
                                     span: Position {
@@ -684,7 +688,7 @@ NewChName:"#), @r###"
                                             radix: 10,
                                         },
                                         Span {
-                                            source: Source(
+                                            source: File(
                                                 "test.event",
                                             ),
                                             span: Position {
@@ -700,7 +704,7 @@ NewChName:"#), @r###"
                                     ),
                                 ),
                                 Span {
-                                    source: Source(
+                                    source: File(
                                         "test.event",
                                     ),
                                     span: Position {
@@ -717,7 +721,7 @@ NewChName:"#), @r###"
                         ],
                     ),
                     Span {
-                        source: Source(
+                        source: File(
                             "test.event",
                         ),
                         span: Position {
@@ -741,7 +745,7 @@ NewChName:"#), @r###"
                                             "NewChName",
                                         ),
                                         Span {
-                                            source: Source(
+                                            source: File(
                                                 "test.event",
                                             ),
                                             span: Position {
@@ -757,7 +761,7 @@ NewChName:"#), @r###"
                                     ),
                                 ),
                                 Span {
-                                    source: Source(
+                                    source: File(
                                         "test.event",
                                     ),
                                     span: Position {
@@ -776,7 +780,7 @@ NewChName:"#), @r###"
                                     (
                                         Colon,
                                         Span {
-                                            source: Source(
+                                            source: File(
                                                 "test.event",
                                             ),
                                             span: Position {
@@ -792,7 +796,7 @@ NewChName:"#), @r###"
                                     ),
                                 ),
                                 Span {
-                                    source: Source(
+                                    source: File(
                                         "test.event",
                                     ),
                                     span: Position {
@@ -809,7 +813,7 @@ NewChName:"#), @r###"
                         ],
                     ),
                     Span {
-                        source: Source(
+                        source: File(
                             "test.event",
                         ),
                         span: Position {

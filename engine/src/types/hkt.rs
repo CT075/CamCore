@@ -4,8 +4,8 @@
 // In the future, this could be rewritten to use GATs which would simplify a
 // lot, particularly the duplicate trait bounds. While I'm not, in general,
 // afraid of unstabilized features, I think that there's a lot of space to
-// explore the GAT approach and don't have much time to deal with any issues
-// that arise from them.
+// explore the GAT approach and don't want to spend the time dealing with any
+// issues that arise from them.
 //
 // In particular, we could probably just do this:
 //
@@ -21,7 +21,11 @@
 // clunky [F: Witness<A> + Witness<B>] bound (which in turn requires a lot of
 // [<F as Witness<A>>::This] boilerplate).
 
-pub trait Witness<A>: Sized {
+use std::marker::PhantomData;
+
+pub trait Witness<A>:
+    Sized + PartialEq + Eq + Copy + Clone + std::fmt::Debug
+{
     // We can work around the unsafety required by the OCaml embedding because
     // Rust has associated types, which is sufficient.
     type This;
@@ -44,21 +48,25 @@ where
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum IdentityW {}
 impl<A> Witness<A> for IdentityW {
     type This = A;
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum OptionW {}
 impl<A> Witness<A> for OptionW {
     type This = Option<A>;
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum VecW {}
 impl<A> Witness<A> for VecW {
     type This = Vec<A>;
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum VoidW {}
 impl<A> Witness<A> for VoidW {
     type This = std::convert::Infallible;
@@ -81,7 +89,8 @@ impl VoidW {
 }
 
 pub struct ConstW<T> {
-    phantom: std::marker::PhantomData<T>,
+    seal: std::convert::Infallible,
+    phantom: PhantomData<T>,
 }
 
 impl<T, A> Witness<A> for ConstW<T> {
@@ -96,8 +105,38 @@ impl<T> ConstW<T> {
     }
 }
 
+impl<T> Clone for ConstW<T> {
+    fn clone(&self) -> Self {
+        ConstW {
+            seal: self.seal,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T> Copy for ConstW<T> {}
+
+impl<T> PartialEq for ConstW<T> {
+    fn eq(&self, other: &Self) -> bool {
+        true
+    }
+}
+
+impl<T> Eq for ConstW<T> {}
+
+impl<T> std::fmt::Debug for ConstW<T> {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
+        match self.seal {}
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct ComposeW<F, G> {
-    phantom: std::marker::PhantomData<(F, G)>,
+    seal: std::convert::Infallible,
+    phantom: PhantomData<(F, G)>,
 }
 
 impl<F, G, A> Witness<A> for ComposeW<F, G>
