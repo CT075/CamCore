@@ -152,7 +152,7 @@ impl chumsky::span::Span for Span {
 
 pub type Spanned<T> = (T, Span);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SpannedW {}
 
 impl<T> Witness<T> for SpannedW {

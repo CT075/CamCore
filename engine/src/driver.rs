@@ -12,14 +12,21 @@ use crate::{
     types::{string_with_vars as swv, StringWithVars},
 };
 
-// TODO: make this a trait?
-struct Driver<E> {
-    message_log: Vec<String>,
-    error_log: Vec<E>,
+pub trait OutputSink<E> {
+    fn push_message(&mut self, s: String, span: Span);
+
+    fn push_error(&mut self, e: E);
 }
 
-impl<E> pp::Driver<E> for Driver<E>
+// TODO: make this a trait?
+struct Driver<Sink, E> {
+    sink: Sink,
+    phantom: std::marker::PhantomData<E>,
+}
+
+impl<Sink, E> pp::Driver<E> for Driver<Sink, E>
 where
+    Sink: OutputSink<E>,
     E: pp::ErrorHandler + swv::RenderErrorHandler,
 {
     fn push_message(
@@ -29,8 +36,8 @@ where
         span: Span,
     ) {
         match msg.render(lookup_symbol) {
-            Ok(msg) => self.message_log.push(msg),
-            Err(e) => self.error_log.extend(e),
+            Ok(msg) => self.sink.push_message(msg, span),
+            Err(es) => es.into_iter().for_each(|e| self.sink.push_error(e)),
         }
     }
 
@@ -45,7 +52,7 @@ where
 
     /// Push a preprocessing error to the driver.
     fn push_error(&mut self, err: E) {
-        self.error_log.push(err)
+        self.sink.push_error(err)
     }
 
     fn register_symbol(&mut self, symbol: String, span: Span) {

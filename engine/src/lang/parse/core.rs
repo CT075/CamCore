@@ -2,14 +2,21 @@ use std::rc::Rc;
 
 use chumsky::{error::Error as ChumskyError, prelude::*};
 
-use crate::lang::syntax::{
-    span::Position, Argument, Expr, Operator, Span, Spanned, Statement, Token,
+use crate::lang::{
+    syntax,
+    syntax::{
+        span::{Position, SpannedW},
+        Expr, Operator, Span, Spanned, Token,
+    },
 };
 
 use super::common::GenericParseErrorHandler;
 
 #[cfg(test)]
 mod tests;
+
+type Argument = syntax::Argument<SpannedW>;
+type Statement = syntax::Statement<SpannedW>;
 
 type Carrier<E> = super::common::Carrier<Token, E>;
 
@@ -195,6 +202,13 @@ where
         },
     );
 
+    // It's important to check [expr] before [paren_wrapped]. If we do the
+    // reverse, then we'll run into issues with lines like
+    //
+    //   h (a + b) + c
+    //
+    // where the text [(a+b)] is treated as a 1-tuple instead of an atom
+    // expression, causing a parse error on the following `+`.
     choice((
         expr.map(|(e, _span)| Argument::Single(e)),
         paren_wrapped,
