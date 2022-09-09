@@ -4,10 +4,7 @@ use relative_path::RelativePath;
 
 use super::types::*;
 
-pub struct FileTree<'a> {
-    roots: &'a Vec<PathBuf>,
-    current_dir: Option<PathBuf>,
-}
+pub struct FileTree<'a>(&'a Vec<PathBuf>);
 
 impl<'a> FileTree<'a> {
     pub fn with_roots<F, A>(roots: Vec<impl AsRef<Path>>, f: F) -> A
@@ -16,27 +13,15 @@ impl<'a> FileTree<'a> {
     {
         let roots = roots.iter().map(|p| p.as_ref().to_owned()).collect();
 
-        f(FileTree {
-            roots: &roots,
-            current_dir: None,
-        })
+        f(FileTree(&roots))
     }
 }
 
 impl<'a> FileTreeProvider for FileTree<'a> {
-    fn with_current_directory<F, A>(&self, dir: impl AsRef<Path>, f: F) -> A
-    where
-        F: FnOnce(&Self) -> A,
-    {
-        f(&FileTree {
-            roots: self.roots,
-            current_dir: Some(dir.as_ref().to_owned()),
-        })
-    }
-
     fn search_and_load_file<K, E>(
         &self,
         path: &RelativePath,
+        current_directory: Option<impl AsRef<Path>>,
         kind: K,
     ) -> Result<(PathBuf, K::Payload), E>
     where
@@ -50,6 +35,7 @@ impl<'a> FileTreeProvider for FileTree<'a> {
         &self,
         exe: &RelativePath,
         args: Vec<String>,
+        current_directory: Option<impl AsRef<Path>>,
         kind: K,
     ) -> Result<(PathBuf, K::Payload), E>
     where

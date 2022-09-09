@@ -32,13 +32,10 @@ impl Kind for Binary {
 }
 
 pub trait FileTreeProvider {
-    fn with_current_directory<F, A>(&self, dir: impl AsRef<Path>, f: F) -> A
-    where
-        F: FnOnce(&Self) -> A;
-
     fn search_and_load_file<K, E>(
         &self,
         path: &RelativePath,
+        current_directory: Option<impl AsRef<Path>>,
         kind: K,
     ) -> Result<(PathBuf, K::Payload), E>
     where
@@ -49,6 +46,7 @@ pub trait FileTreeProvider {
         &self,
         exe: &RelativePath,
         args: Vec<String>,
+        current_directory: Option<impl AsRef<Path>>,
         kind: K,
     ) -> Result<(PathBuf, K::Payload), E>
     where

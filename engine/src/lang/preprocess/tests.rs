@@ -224,7 +224,7 @@ impl Driver<E> for TestDriver {
     fn push_line<'a>(
         &'a mut self,
         toks: Vec<Spanned<Token>>,
-        original: Vec<Token>,
+        _original: Vec<Token>,
     ) {
         self.lines.push(toks.into_iter().map(|(t, _)| t).collect())
     }
