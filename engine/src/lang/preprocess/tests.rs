@@ -223,23 +223,10 @@ impl Driver<E> for TestDriver {
 
     fn push_line<'a>(
         &'a mut self,
-        definitions: Definitions<'a>,
-        line: Events,
-        _original_line: &'a Vec<TokenGroup>,
+        toks: Vec<Spanned<Token>>,
+        original: Vec<Token>,
     ) {
-        let expanded: Result<_, Vec<E>> =
-            expand_events_until_finished(definitions, line);
-
-        match expanded {
-            Ok(toks) => {
-                self.lines.push(toks.into_iter().map(|(t, _)| t).collect())
-            }
-            Err(es) => {
-                for e in es.iter() {
-                    self.errors.push(e.clone())
-                }
-            }
-        }
+        self.lines.push(toks.into_iter().map(|(t, _)| t).collect())
     }
 
     fn push_error(&mut self, err: E) {

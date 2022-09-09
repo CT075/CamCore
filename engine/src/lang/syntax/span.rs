@@ -72,12 +72,12 @@ impl Span {
         &self.span.end
     }
 
-    // XXX: this panics. we could avoid that by having the preprocessor track
-    // the source (rather than this type).
     pub fn join(&self, other: &Self) -> Self {
         let start = self.start();
         let end = other.end();
 
+        // XXX: this panics. we could avoid that by having the preprocessor
+        // track the source (rather than this type).
         if self.source() != other.source() {
             panic!(
                 "BUG: nonsensical [Span::join] between different source files"

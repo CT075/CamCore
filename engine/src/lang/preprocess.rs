@@ -115,8 +115,6 @@ where
     context.driver
 }
 
-pub struct Definitions<'a>(&'a HashMap<String, Definition>);
-
 enum Definition {
     // The separation between [Builtin] and [Reserved] here is for ease of
     // parsing. [Builtin]s take arguments, [Reserved]s don't.
@@ -154,9 +152,8 @@ pub trait Driver<E: ErrorHandler> {
     /// input while parsing, which will help error granularity.
     fn push_line<'a>(
         &'a mut self,
-        definitions: Definitions<'a>,
-        line: Events,
-        original_line: &'a Vec<TokenGroup>,
+        line: Vec<Spanned<Token>>,
+        original: Vec<Token>,
     );
 
     /// Push a preprocessing error to the driver.
@@ -288,11 +285,18 @@ where
                         self.driver.push_error(err);
                     }
                 }
-                Ok(events) => self.driver.push_line(
-                    Definitions(&self.defines),
-                    Events(events),
-                    &line.iter().map(|(group, _)| group.clone()).collect(),
-                ),
+                Ok(events) => {
+                    match expand_events_until_finished(&self.defines, events) {
+                        Ok(expanded_line) => {
+                            let original = flatten_spanless(&line);
+
+                            self.driver.push_line(expanded_line, original)
+                        }
+                        Err(es) => es
+                            .into_iter()
+                            .for_each(|e| self.driver.push_error(e)),
+                    }
+                }
             },
         }
     }
@@ -415,6 +419,15 @@ where
     }
 }
 
+fn flatten_spanless(line: &Vec<Spanned<TokenGroup>>) -> Vec<Token> {
+    line.iter()
+        .flat_map(|(group, _span)| match group {
+            TokenGroup::Single((tok, _span)) => vec![tok.clone()],
+            TokenGroup::Group { kind: _, members } => flatten_spanless(members),
+        })
+        .collect()
+}
+
 enum Event {
     Token(Token),
     ExpandTo {
@@ -423,11 +436,9 @@ enum Event {
     },
 }
 
-pub struct Events(Vec<Spanned<Event>>);
-
-pub fn expand_events_until_finished<E>(
-    Definitions(definitions): Definitions<'_>,
-    Events(events): Events,
+fn expand_events_until_finished<E>(
+    definitions: &HashMap<String, Definition>,
+    events: Vec<Spanned<Event>>,
 ) -> Result<Vec<Spanned<Token>>, Vec<E>>
 where
     E: ErrorHandler,

@@ -6,7 +6,7 @@ use crate::{
     io::ErrorHandler as IOErrorHandler,
     lang::{
         preprocess as pp,
-        syntax::{span::Source, Span, Spanned, TokenGroup},
+        syntax::{span::Source, Span, Spanned, Token},
     },
     plumbing::*,
     types::{string_with_vars as swv, StringWithVars},
@@ -43,9 +43,8 @@ where
 
     fn push_line<'a>(
         &'a mut self,
-        definitions: pp::Definitions<'a>,
-        line: pp::Events,
-        original_line: &'a Vec<TokenGroup>,
+        line: Vec<Spanned<Token>>,
+        original: Vec<Token>,
     ) {
         todo!()
     }
