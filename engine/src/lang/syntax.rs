@@ -174,6 +174,12 @@ pub enum Statement<S: Witness<Argument<S>> + Witness<Expr>> {
     Label(Rc<String>),
 }
 
+pub enum Event<S: Witness<Argument<S>> + Witness<Expr>> {
+    Statement(Statement<S>),
+    OpenScope,
+    CloseScope,
+}
+
 mod private {
     use super::span::SpannedW;
 

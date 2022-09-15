@@ -17,6 +17,7 @@ mod tests;
 
 type Argument = syntax::Argument<SpannedW>;
 type Statement = syntax::Statement<SpannedW>;
+type Event = syntax::Event<SpannedW>;
 
 type Carrier<E> = super::common::Carrier<Token, E>;
 
@@ -237,13 +238,16 @@ where
 }
 
 fn line<E>(
-) -> impl Parser<Token, Vec<Spanned<Statement>>, Error = Carrier<E>> + Clone
+) -> impl Parser<Token, Vec<Spanned<Event>>, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
     label()
-        .map_with_span(|l, span| vec![(l, span)])
+        .map_with_span(|l, span| vec![(Event::Statement(l), span)])
         .or(instruction()
+            .map(Event::Statement)
+            .or(just(Token::LCurly).to(Event::OpenScope))
+            .or(just(Token::RCurly).to(Event::CloseScope))
             .map_with_span(|l, span| (l, span))
             .separated_by(just(Token::Semi))
             .then_ignore(end()))
@@ -251,7 +255,7 @@ where
 
 pub fn parse_line<E>(
     tokens: Vec<Spanned<Token>>,
-) -> Result<Vec<Spanned<Statement>>, Vec<E>>
+) -> Result<Vec<Spanned<Event>>, Vec<E>>
 where
     E: ErrorHandler,
 {

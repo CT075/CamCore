@@ -182,3 +182,57 @@ where
     <S as Witness<Argument<S>>>::This: Eq,
 {
 }
+
+impl<S> std::fmt::Debug for Event<S>
+where
+    S: Witness<Argument<S>> + Witness<Expr>,
+    <S as Witness<Expr>>::This: std::fmt::Debug,
+    <S as Witness<Argument<S>>>::This: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Self::Statement(s) => write!(f, "{:?}", s),
+            Self::OpenScope => write!(f, "OpenScope"),
+            Self::CloseScope => write!(f, "CloseScope"),
+        }
+    }
+}
+
+impl<S> Clone for Event<S>
+where
+    S: Witness<Argument<S>> + Witness<Expr>,
+    <S as Witness<Expr>>::This: Clone,
+    <S as Witness<Argument<S>>>::This: Clone,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Statement(s) => Self::Statement(s.clone()),
+            Self::OpenScope => Self::OpenScope,
+            Self::CloseScope => Self::CloseScope,
+        }
+    }
+}
+
+impl<S> PartialEq for Event<S>
+where
+    S: Witness<Argument<S>> + Witness<Expr>,
+    <S as Witness<Expr>>::This: PartialEq,
+    <S as Witness<Argument<S>>>::This: PartialEq,
+{
+    fn eq(&self, rhs: &Self) -> bool {
+        match (self, rhs) {
+            (Self::Statement(s1), Self::Statement(s2)) => s1 == s2,
+            (Self::OpenScope, Self::OpenScope)
+            | (Self::CloseScope, Self::CloseScope) => true,
+            _ => false,
+        }
+    }
+}
+
+impl<S> Eq for Event<S>
+where
+    S: Witness<Argument<S>> + Witness<Expr>,
+    <S as Witness<Expr>>::This: Eq,
+    <S as Witness<Argument<S>>>::This: Eq,
+{
+}
