@@ -19,7 +19,9 @@ type Argument = syntax::Argument<SpannedW>;
 type Statement = syntax::Statement<SpannedW>;
 type Event = syntax::Event<SpannedW>;
 
-type Carrier<E> = super::common::Carrier<Token, E>;
+enum W {}
+
+type Carrier<E> = super::common::Carrier<Token, E, W>;
 
 pub trait ErrorHandler: GenericParseErrorHandler<Token> + 'static {
     fn bad_number(span: Span) -> Self;
