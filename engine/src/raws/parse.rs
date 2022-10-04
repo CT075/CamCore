@@ -102,13 +102,6 @@ where
     )
 }
 
-struct CodeHeader {
-    name: String,
-    id: u16,
-    length: usize,
-    flags: Vec<Flag>,
-}
-
 /*
    Code:
     Code syntax is the following:
@@ -119,6 +112,13 @@ struct CodeHeader {
     must have either different amount of parameters or one or more
     of the parameters must have different amount of dimensions.
 */
+
+struct CodeHeader {
+    name: String,
+    id: u16,
+    length: usize,
+    flags: Vec<Flag>,
+}
 
 fn code<E>() -> impl Parser<char, CodeHeader, Error = Carrier<E>>
 where
@@ -151,6 +151,58 @@ where
             Ok(CodeHeader {
                 name,
                 id,
+                length,
+                flags,
+            })
+        })
+}
+
+/*
+   Parameter:
+    Each code has 0 or more parameters. Syntax is following:
+     ParameterName, Position, Length, flags
+    If no Flags are used, last ',' can be left out. The position must
+    be greater or equal than zero, or greater or equal than 2 if code
+    has an ID. The Sum of Position and Length must be smaller than
+    length of the code and the parameters can't use the same bits
+    in code. There also must be white space before the ParameterName.
+*/
+
+struct Parameter {
+    name: String,
+    position: usize,
+    length: usize,
+    flags: Vec<Flag>,
+}
+
+// XXX: This shares the same structure as [code], just with mandatory
+// leading whitespace. It'd be nice to share them.
+fn parameter<E>() -> impl Parser<char, Parameter, Error = Carrier<E>>
+where
+    E: ErrorHandler,
+{
+    ident()
+        .then_ignore(just(','))
+        .then((number().then_ignore(just(','))).padded())
+        .then(number())
+        .then((just(',').ignore_then(flag().repeated())).or_not())
+        .try_map(|(((name, position), length), flags), span| {
+            let (position, radix) = position;
+
+            let position = parse_number(&position, radix, span.clone())?;
+
+            let (length, radix) = length;
+
+            let length = parse_number(&length, radix, span.clone())?;
+
+            let flags = match flags {
+                None => vec![],
+                Some(flags) => flags,
+            };
+
+            Ok(Parameter {
+                name,
+                position,
                 length,
                 flags,
             })
