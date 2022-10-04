@@ -9,10 +9,11 @@ TODO
 The following are issues/chores in the codebase that I didn't want to spend too
 much time on. These would be good cleanup issues.
 
-### Module structure
+### Empty/Non-empty containers
 
-The module structure of `engine` is a complete disaster. I initially had a nice
-idea where `lang` would contain the assembler front-end, from parsing to
-preprocessing, and hand a list (stream?) of `Statement`s to the backend, which
-would take care of the actual assembly. However, as the project progressed,
-things got
+There are several places where we use the type `Option<Vec<T>>` for some `T`,
+in which `Some([])` is invalid. In other places, we simply use `Vec<T>` to
+represent a structure in which "empty list of args" gets special handling. In
+both cases, we should instead use `Option<NonEmptyVec<T>>` to make the
+semantics clearer.
+
