@@ -5,11 +5,11 @@ use crate::lang::syntax::Span;
 //mod directive;
 //pub mod lexer;
 
-// The third [T] parameter is so we can have [Carrier]s with the same [I]nput
+// The third [W] parameter is so we can have [Carrier]s with the same [I]nput
 // types without running afoul of the canonicity check
 #[allow(dead_code)]
 #[derive(Debug)]
-pub enum Carrier<I, E, T> {
+pub enum Carrier<I, E, W> {
     GenericParseError {
         span: Span,
         expected: HashSet<Option<I>>,
@@ -24,7 +24,7 @@ pub enum Carrier<I, E, T> {
     },
     Specific(E),
     // This is [Infallible] to ensure that it's never constructed
-    Tag(T, std::convert::Infallible),
+    Tag(W, std::convert::Infallible),
 }
 
 pub trait GenericParseErrorHandler<I: std::hash::Hash + Eq>: Sized {
@@ -45,7 +45,7 @@ pub trait GenericParseErrorHandler<I: std::hash::Hash + Eq>: Sized {
     }
 }
 
-impl<I, E, T> Carrier<I, E, T>
+impl<I, E, W> Carrier<I, E, W>
 where
     I: PartialEq + Eq + std::hash::Hash + Clone,
     E: GenericParseErrorHandler<I>,
