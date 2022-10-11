@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+mod builder;
 mod parse;
 
 // TODO: Raws documentation comments.

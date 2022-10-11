@@ -5,8 +5,6 @@ use crate::lang::{
     syntax::Span,
 };
 
-use super::*;
-
 enum W {}
 
 type Carrier<E> = C<char, E, W>;
@@ -17,56 +15,29 @@ pub trait ErrorHandler: GenericParseErrorHandler<char> + 'static {
     fn id_too_big(s: String, span: Span) -> Self;
 }
 
-impl<E> ChumskyError<char> for Carrier<E>
+// XXX: I'd really like to make all of these transient types only exist within
+// the parser and the builder, but I don't know of a good way to do that while
+// keeping [parse] and [builder] as siblings, so these are pub to [super] as
+// well.
+pub(super) enum Out {
+    C(CodeHeader),
+    P(Parameter),
+}
+
+pub(super) fn parse_line<E>(l: String) -> Result<Out, Vec<E>>
 where
     E: ErrorHandler,
 {
-    type Span = Span;
-    type Label = std::convert::Infallible;
-
-    fn expected_input_found<I>(
-        span: Self::Span,
-        expected: I,
-        found: Option<char>,
-    ) -> Self
-    where
-        I: IntoIterator<Item = Option<char>>,
-    {
-        Self::generic_parse_error(span, expected, found)
-    }
-
-    fn unclosed_delimiter(
-        unclosed_span: Self::Span,
-        unclosed: char,
-        span: Self::Span,
-        expected: char,
-        found: Option<char>,
-    ) -> Self {
-        Self::unclosed_delimiter_impl(
-            unclosed_span,
-            unclosed,
-            span,
-            expected,
-            found,
-        )
-    }
-
-    fn merge(self, other: Self) -> Self {
-        Self::merge_impl(self, other)
-    }
-
-    fn with_label(self, label: Self::Label) -> Self {
-        match label {}
-    }
+    todo!()
 }
 
-enum Payload {
+pub(super) enum Payload {
     // TODO: use nonempty vec for this variant
     Values(Vec<String>),
     Range { start: String, end: String },
 }
 
-struct Flag {
+pub(super) struct Flag {
     name: String,
     payload: Option<Payload>,
 }
@@ -113,7 +84,7 @@ where
     of the parameters must have different amount of dimensions.
 */
 
-struct CodeHeader {
+pub(super) struct CodeHeader {
     name: String,
     id: u16,
     length: usize,
@@ -168,7 +139,7 @@ where
     in code. There also must be white space before the ParameterName.
 */
 
-struct Parameter {
+pub(super) struct Parameter {
     name: String,
     position: usize,
     length: usize,
@@ -181,32 +152,38 @@ fn parameter<E>() -> impl Parser<char, Parameter, Error = Carrier<E>>
 where
     E: ErrorHandler,
 {
-    ident()
-        .then_ignore(just(','))
-        .then((number().then_ignore(just(','))).padded())
-        .then(number())
-        .then((just(',').ignore_then(flag().repeated())).or_not())
-        .try_map(|(((name, position), length), flags), span| {
-            let (position, radix) = position;
+    filter(|c: &char| c.is_whitespace())
+        .repeated()
+        .at_least(1)
+        .ignore_then(
+            ident()
+                .then_ignore(just(','))
+                .then((number().then_ignore(just(','))).padded())
+                .then(number())
+                .then((just(',').ignore_then(flag().repeated())).or_not())
+                .try_map(|(((name, position), length), flags), span| {
+                    let (position, radix) = position;
 
-            let position = parse_number(&position, radix, span.clone())?;
+                    let position =
+                        parse_number(&position, radix, span.clone())?;
 
-            let (length, radix) = length;
+                    let (length, radix) = length;
 
-            let length = parse_number(&length, radix, span.clone())?;
+                    let length = parse_number(&length, radix, span.clone())?;
 
-            let flags = match flags {
-                None => vec![],
-                Some(flags) => flags,
-            };
+                    let flags = match flags {
+                        None => vec![],
+                        Some(flags) => flags,
+                    };
 
-            Ok(Parameter {
-                name,
-                position,
-                length,
-                flags,
-            })
-        })
+                    Ok(Parameter {
+                        name,
+                        position,
+                        length,
+                        flags,
+                    })
+                }),
+        )
 }
 
 // TODO: un-copypaste this from [preprocess::parse::number], and figure out how
@@ -248,4 +225,47 @@ where
 {
     usize::from_str_radix(s.as_str(), radix as u32)
         .map_err(move |_| Carrier::Specific(E::bad_number(span)))
+}
+
+impl<E> ChumskyError<char> for Carrier<E>
+where
+    E: ErrorHandler,
+{
+    type Span = Span;
+    type Label = std::convert::Infallible;
+
+    fn expected_input_found<I>(
+        span: Self::Span,
+        expected: I,
+        found: Option<char>,
+    ) -> Self
+    where
+        I: IntoIterator<Item = Option<char>>,
+    {
+        Self::generic_parse_error(span, expected, found)
+    }
+
+    fn unclosed_delimiter(
+        unclosed_span: Self::Span,
+        unclosed: char,
+        span: Self::Span,
+        expected: char,
+        found: Option<char>,
+    ) -> Self {
+        Self::unclosed_delimiter_impl(
+            unclosed_span,
+            unclosed,
+            span,
+            expected,
+            found,
+        )
+    }
+
+    fn merge(self, other: Self) -> Self {
+        Self::merge_impl(self, other)
+    }
+
+    fn with_label(self, label: Self::Label) -> Self {
+        match label {}
+    }
 }

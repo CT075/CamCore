@@ -7,7 +7,7 @@ TODO
 ## Low-hanging fruit
 
 The following are issues/chores in the codebase that I didn't want to spend too
-much time on. These would be good cleanup issues.
+much time on. These would be good starter issues.
 
 ### Empty/Non-empty containers
 
