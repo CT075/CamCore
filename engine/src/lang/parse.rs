@@ -6,4 +6,4 @@
 pub mod common;
 mod core;
 
-pub use self::core::parse_line;
+pub use self::core::{parse_line, ErrorHandler};

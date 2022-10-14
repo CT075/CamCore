@@ -9,3 +9,4 @@ edition = "2021"
 cam_core_lib = { path = "../../engine" }
 
 clap = { version = "4.0.0", features = ["derive", "wrap_help"] }
+ariadne = "0.1.5"

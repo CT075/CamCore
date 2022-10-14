@@ -5,7 +5,7 @@ authors = ["Cameron Wong <cam@camdar.io>"]
 edition = "2021"
 
 [lib]
-name = "cam_core_internal"
+name = "ea"
 path = "src/lib.rs"
 
 [dependencies]
