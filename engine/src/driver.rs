@@ -3,12 +3,15 @@ use std::path::{Path, PathBuf};
 use relative_path::RelativePath;
 
 use crate::{
+    assembler,
+    assembler::{Assembler, Backend},
     io::ErrorHandler as IOErrorHandler,
     lang::{
+        parse,
+        parse::parse_line,
         preprocess as pp,
         syntax::{span::Source, Span, Spanned, Token},
     },
-    plumbing::*,
     types::{string_with_vars as swv, StringWithVars},
 };
 
@@ -19,15 +22,20 @@ pub trait OutputSink<E> {
 }
 
 // TODO: make this a trait?
-struct Driver<Sink, E> {
+struct Driver<Sink, E, B> {
     sink: Sink,
     phantom: std::marker::PhantomData<E>,
+    backend: Assembler<B>,
 }
 
-impl<Sink, E> pp::Driver<E> for Driver<Sink, E>
+impl<Sink, E, B> pp::Driver<E> for Driver<Sink, E, B>
 where
     Sink: OutputSink<E>,
-    E: pp::ErrorHandler + swv::RenderErrorHandler,
+    E: pp::ErrorHandler
+        + swv::RenderErrorHandler
+        + parse::ErrorHandler
+        + assembler::ErrorHandler,
+    B: Backend,
 {
     fn push_message(
         &mut self,
@@ -46,7 +54,13 @@ where
         line: Vec<Spanned<Token>>,
         original: Vec<Token>,
     ) {
-        todo!()
+        match parse_line(line) {
+            Ok(evs) => match self.backend.handle_events(evs) {
+                Ok(()) => (),
+                Err(es) => self.push_errors(es),
+            },
+            Err(es) => self.push_errors(es),
+        }
     }
 
     /// Push a preprocessing error to the driver.

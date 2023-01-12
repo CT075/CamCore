@@ -150,6 +150,8 @@ pub trait Driver<E: ErrorHandler> {
     /// from this module to flatten the line into its constituent tokens. This
     /// is to ensure that the driver doesn't lose context on the original user
     /// input while parsing, which will help error granularity.
+    // XXX: It will probably be _way_ easier to just annotate the expanded
+    // token with an [original_source] field.
     fn push_line<'a>(
         &'a mut self,
         line: Vec<Spanned<Token>>,
@@ -158,6 +160,12 @@ pub trait Driver<E: ErrorHandler> {
 
     /// Push a preprocessing error to the driver.
     fn push_error(&mut self, err: E);
+
+    fn push_errors(&mut self, errs: Vec<E>) {
+        for e in errs {
+            self.push_error(e)
+        }
+    }
 
     /// Registers a symbol with the driver. This is important for error
     /// reporting in cases where a label is defined with the same name as a
@@ -344,6 +352,13 @@ where
 
                 self.register_symbol(ident.clone(), body, span.clone())
             }
+            // TODO: Currently, an unclosed `{}` scope can be closed in an
+            // [#include]d file, but that should probably be an error instead.
+            //
+            // The easiest way I can think of is to push some kind of "new
+            // file" event to the driver (following [push_binary_file] and the
+            // like) and have it manually invoke a new instance of the
+            // preprocessor.
             Include(path) => {
                 let current_dir = extract_current_dir(span);
 

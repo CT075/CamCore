@@ -9,6 +9,9 @@ TODO
 The following are issues/chores in the codebase that I didn't want to spend too
 much time on. These would be good starter issues.
 
+This is not an exhaustive list; running a quick grep around the codebase for
+`XXX` or `TODO` to find other issues is also a good idea.
+
 ### Empty/Non-empty containers
 
 There are several places where we use the type `Option<Vec<T>>` for some `T`,

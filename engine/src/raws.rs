@@ -31,6 +31,7 @@ pub struct Raw {
     game: HashSet<String>,
     alignment: usize,
     kind: Kind,
+    params: Vec<Param>,
 }
 
 impl Raw {
@@ -39,12 +40,14 @@ impl Raw {
         game: HashSet<String>,
         alignment: usize,
         kind: Kind,
+        params: Vec<Param>,
     ) -> Self {
         Self {
             id,
             game,
             alignment,
             kind,
+            params,
         }
     }
 }

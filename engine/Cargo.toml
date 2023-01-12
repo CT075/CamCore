@@ -12,6 +12,8 @@ path = "src/lib.rs"
 chumsky = "0.8.0"
 indexmap = "1.4.0"
 relative-path = "1.3.2"
+# XXX: we probably don't need to pull in an entire crate for this
+nonempty = "0.8.1"
 
 [dev-dependencies]
 insta = "1.15.0"

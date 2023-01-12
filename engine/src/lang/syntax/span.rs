@@ -1,4 +1,4 @@
-// XXX: This probably doesn't belong under [lang].
+// TODO: Move this out of [lang] and make it a top-level module.
 
 use std::{
     default::Default,

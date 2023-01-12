@@ -15,9 +15,9 @@ use super::common::GenericParseErrorHandler;
 #[cfg(test)]
 mod tests;
 
-type Argument = syntax::Argument<SpannedW>;
-type Statement = syntax::Statement<SpannedW>;
-type Event = syntax::Event<SpannedW>;
+pub type Argument = syntax::Argument<SpannedW>;
+pub type Statement = syntax::Statement<SpannedW>;
+pub type Event = syntax::Event<SpannedW>;
 
 enum W {}
 
