@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use chumsky::{error::Error as ChumskyError, prelude::*};
 
 use crate::lang::{
@@ -94,7 +92,7 @@ where
     )
 }
 
-fn val<E>() -> impl Parser<Token, Rc<String>, Error = Carrier<E>> + Clone
+fn val<E>() -> impl Parser<Token, String, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {

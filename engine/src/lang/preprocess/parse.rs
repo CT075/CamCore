@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use chumsky::{error::Error as ChumskyError, prelude::*};
 use indexmap::IndexSet;
 use relative_path::RelativePathBuf;
@@ -604,7 +602,7 @@ where
     let quoted_string = quoted_string();
 
     choice((
-        ident.map(|s| Token::Ident(Rc::new(s))),
+        ident.map(|s| Token::Ident(s)),
         number.map(|(payload, radix)| Token::Number { payload, radix }),
         quoted_string.map(Token::QuotedString),
         just(':').to(Token::Colon),

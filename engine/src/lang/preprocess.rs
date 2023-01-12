@@ -446,7 +446,7 @@ fn flatten_spanless(line: &Vec<Spanned<TokenGroup>>) -> Vec<Token> {
 enum Event {
     Token(Token),
     ExpandTo {
-        from: Option<(Rc<String>, Span)>,
+        from: Option<(String, Span)>,
         body: Vec<TokenGroup>,
     },
 }
@@ -513,16 +513,12 @@ where
             Some((name, defn_site)) => {
                 if seen.iter().any(|s| *s == *name) {
                     Err(vec![E::recursive_macro(
-                        name.as_ref(),
+                        &name,
                         defn_site.clone(),
                         span.clone(),
                     )])
                 } else {
-                    expand_events(
-                        definitions,
-                        evts,
-                        seen.cons(name.as_ref().to_owned()),
-                    )
+                    expand_events(definitions, evts, seen.cons(name.clone()))
                 }
             }
             None => expand_events(definitions, evts, seen),
@@ -591,7 +587,7 @@ fn parse_events_impl<E>(
                         span.clone(),
                     )),
                     Some(Definition::Builtin(f)) => {
-                        match fetch_args(&mut tokens, &**s, None, span) {
+                        match fetch_args(&mut tokens, &s, None, span) {
                             Ok((args, arg_span)) => result.push((
                                 Event::ExpandTo {
                                     from: None,
@@ -605,7 +601,7 @@ fn parse_events_impl<E>(
                     Some(Definition::Macro(arg_names, body, defn_site)) => {
                         match fetch_args(
                             &mut tokens,
-                            &**s,
+                            &s,
                             Some(defn_site.clone()),
                             span,
                         ) {
@@ -616,7 +612,7 @@ fn parse_events_impl<E>(
 
                                 if expected != received {
                                     errs.push(E::wrong_number_of_arguments(
-                                        &**s,
+                                        &s,
                                         expected,
                                         received,
                                         defn_site.clone(),
@@ -661,8 +657,7 @@ fn expand_body_single(
 ) -> Vec<TokenGroup> {
     body.iter()
         .flat_map(|group| match group {
-            TokenGroup::Single((Token::Ident(s), span)) => match args.get(&**s)
-            {
+            TokenGroup::Single((Token::Ident(s), span)) => match args.get(&s) {
                 None => {
                     vec![TokenGroup::Single((
                         Token::Ident(s.clone()),

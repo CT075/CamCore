@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use indexmap::IndexSet;
 use relative_path::RelativePathBuf;
 
@@ -11,9 +9,11 @@ pub mod span;
 pub use impls::*;
 pub use span::{Span, Spanned};
 
+// TODO: Eventually, we should implement a string interner, probably at
+// preprocessing time.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Token {
-    Ident(Rc<String>),
+    Ident(String),
     Number { payload: String, radix: usize },
     QuotedString(String),
     Colon,
@@ -116,7 +116,7 @@ pub enum Operator {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     Literal(i32),
-    Var(Rc<String>),
+    Var(String),
     Binop(Operator, Box<Expr>, Box<Expr>),
 }
 
@@ -168,10 +168,10 @@ pub enum Argument<S: Witness<Expr>> {
 
 pub enum Statement<S: Witness<Argument<S>> + Witness<Expr>> {
     Instruction {
-        head: Rc<String>,
+        head: String,
         args: Vec<<S as Witness<Argument<S>>>::This>,
     },
-    Label(Rc<String>),
+    Label(String),
 }
 
 pub enum Event<S: Witness<Argument<S>> + Witness<Expr>> {

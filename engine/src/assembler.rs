@@ -70,12 +70,12 @@ impl<B> Assembler<B> {
         use syntax::Statement::*;
         match ev {
             Statement(Instruction { head, args }) => {
-                self.handle_instruction(&*head, args)
+                self.handle_instruction(&head, args)
             }
             Statement(Label(s)) => {
                 let backlinks = self
                     .symbols
-                    .register_label((&*s).clone(), self.write_head, span)
+                    .register_label((&s).clone(), self.write_head, span)
                     .map_err(|v| vec![v])?;
 
                 todo!()
