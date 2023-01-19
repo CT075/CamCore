@@ -113,6 +113,8 @@ pub enum Operator {
     ShiftRight,
 }
 
+impl Operator {}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     Literal(i32),

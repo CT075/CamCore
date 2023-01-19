@@ -2,6 +2,27 @@ use std::{fmt::Formatter, ops::Deref};
 
 use super::*;
 
+impl Operator {
+    // XXX: We should actually be using the traits from [std::ops] to make this
+    // generic.
+    pub fn operate(self, x: i32, y: i32) -> i32 {
+        use Operator::*;
+
+        match self {
+            Add => x + y,
+            Minus => x - y,
+            Mul => x * y,
+            Div => x / y,
+            Mod => x % y,
+            And => x & y,
+            Or => x | y,
+            Xor => x ^ y,
+            ShiftLeft => x << y,
+            ShiftRight => x >> y,
+        }
+    }
+}
+
 impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         use Token::*;

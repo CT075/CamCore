@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use nonempty::{nonempty, NonEmpty};
 
 use crate::lang::{
-    parse::Event,
+    parse::{Argument, Event},
     syntax,
-    syntax::{span::SpannedW, Argument, Span, Spanned},
+    syntax::{Expr, Operator, Span, Spanned},
 };
 
 pub trait ErrorHandler: 'static {
@@ -21,7 +21,30 @@ pub trait ErrorHandler: 'static {
         defn_loc: Span,
     ) -> Self;
 
+    #[allow(non_snake_case)]
+    fn cant_redefine_currentOffset(span: Span) -> Self;
+
     fn unmatched_close_scope(span: Span) -> Self;
+
+    fn expected_atomic(
+        actual: &'static str,
+        why: &'static str,
+        span: Span,
+    ) -> Self;
+
+    fn org_no_args(span: Span) -> Self;
+
+    fn org_too_many_args(span: Span) -> Self;
+
+    fn org_unknown_vars(unknowns: HashSet<String>, span: Span) -> Self;
+
+    fn push_takes_no_args(span: Span) -> Self;
+
+    fn nothing_to_pop(span: Span) -> Self;
+
+    fn pop_takes_no_args(span: Span) -> Self;
+
+    fn fill_no_args(span: Span) -> Self;
 }
 
 pub trait Backend {
@@ -31,7 +54,50 @@ pub trait Backend {
 pub struct Assembler<B> {
     write_head: usize,
     symbols: SymbolTable,
+    org_stack: Vec<Spanned<usize>>,
     backend: B,
+}
+
+enum EvalResult {
+    Done(i32),
+    HasUnknowns(Expr, HashSet<String>),
+}
+
+fn eval_impl(
+    exp: Expr,
+    lookup: impl Fn(&String) -> Option<i32> + Copy,
+) -> EvalResult {
+    use EvalResult::*;
+    use Expr::*;
+
+    match exp {
+        Literal(x) => Done(x),
+        Var(s) => match lookup(&s) {
+            Some(value) => EvalResult::Done(value),
+            None => HasUnknowns(Var(s.clone()), vec![s].into_iter().collect()),
+        },
+        Binop(op, left, right) => {
+            match (eval_impl(*left, lookup), eval_impl(*right, lookup)) {
+                (Done(l), Done(r)) => Done(op.operate(l, r)),
+                (HasUnknowns(el, els), Done(r)) => HasUnknowns(
+                    Binop(op, Box::new(el), Box::new(Literal(r))),
+                    els,
+                ),
+                (Done(l), HasUnknowns(er, ers)) => HasUnknowns(
+                    Binop(op, Box::new(Literal(l)), Box::new(er)),
+                    ers,
+                ),
+                (HasUnknowns(el, els), HasUnknowns(er, ers)) => HasUnknowns(
+                    Binop(op, Box::new(el), Box::new(er)),
+                    &els | &ers,
+                ),
+            }
+        }
+    }
+}
+
+fn plug(exp: Expr, var: &String, value: i32) -> EvalResult {
+    eval_impl(exp, |s| if s == var { Some(value) } else { None })
 }
 
 impl<B> Assembler<B> {
@@ -70,12 +136,12 @@ impl<B> Assembler<B> {
         use syntax::Statement::*;
         match ev {
             Statement(Instruction { head, args }) => {
-                self.handle_instruction(&head, args)
+                self.handle_instruction(&head, args, span)
             }
             Statement(Label(s)) => {
                 let backlinks = self
                     .symbols
-                    .register_label((&s).clone(), self.write_head, span)
+                    .set_label_to_offset((&s).clone(), self.write_head, span)
                     .map_err(|v| vec![v])?;
 
                 todo!()
@@ -94,12 +160,160 @@ impl<B> Assembler<B> {
     pub fn handle_instruction<E>(
         &mut self,
         head: &String,
-        args: Vec<(Argument<SpannedW>, Span)>,
+        args: Vec<(Argument, Span)>,
+        span: Span,
     ) -> Result<(), Vec<E>>
     where
         E: ErrorHandler,
     {
-        todo!()
+        match head.as_str() {
+            "ORG" => self.do_org(args, span).map_err(|e| vec![e]),
+            "PUSH" => {
+                self.do_push(span.clone());
+                if args.len() > 0 {
+                    Err(vec![E::push_takes_no_args(span)])
+                } else {
+                    Ok(())
+                }
+            }
+            "POP" => {
+                self.do_pop(span.clone()).map_err(|e| vec![e])?;
+                if args.len() > 0 {
+                    Err(vec![E::pop_takes_no_args(span)])
+                } else {
+                    Ok(())
+                }
+            }
+            "FILL" => self.do_fill(args, span).map_err(|e| vec![e]),
+            _ => todo!(),
+        }
+    }
+
+    // We don't want to register backlinks in this function, as some opcodes
+    // (namely, ORG) don't permit them, so we only take [&self] instead of
+    // [&mut self].
+    fn eval(&self, exp: Expr) -> EvalResult {
+        eval_impl(exp, |s| self.symbols.lookup(s))
+    }
+
+    fn do_org<E>(
+        &mut self,
+        args: Vec<(Argument, Span)>,
+        span: Span,
+    ) -> Result<(), E>
+    where
+        E: ErrorHandler,
+    {
+        // XXX: This would be clearer as something along the lines of
+        // ```no_run
+        //   match args[..] {
+        //     [] => ...
+        //     [(Argument::Single(exp), span)] => ...
+        //     // ...
+        //     [_, _, ..] => ,,,
+        //   }
+        // ```
+        //
+        // but it doesn't quite work out with the way moves work in patterns,
+        // so we need to be a bit more roundabout.
+
+        let mut args: VecDeque<_> = args.into_iter().collect();
+
+        let (first_arg, span) = match args.pop_front() {
+            None => return Err(E::org_no_args(span)),
+            Some(spanned_arg) => spanned_arg,
+        };
+
+        match args.len() {
+            // no more args after popping means there was exactly one arg in
+            // the vec
+            0 => (),
+            _ => return Err(E::org_too_many_args(span.clone())),
+        };
+
+        match first_arg {
+            Argument::Tuple(_) => {
+                Err(E::expected_atomic("tuple", "ORG's argument", span.clone()))
+            }
+            Argument::List(_) => {
+                Err(E::expected_atomic("list", "ORG's argument", span.clone()))
+            }
+            Argument::Single(exp) => match self.eval(exp) {
+                EvalResult::Done(i) => {
+                    self.write_head = i as usize;
+                    Ok(())
+                }
+                EvalResult::HasUnknowns(_, uks) => {
+                    Err(E::org_unknown_vars(uks, span))
+                }
+            },
+        }
+    }
+
+    fn do_push(&mut self, span: Span) {
+        self.org_stack.push((self.write_head, span))
+    }
+
+    fn do_pop<E>(&mut self, span: Span) -> Result<(), E>
+    where
+        E: ErrorHandler,
+    {
+        match self.org_stack.pop() {
+            Some((t, _)) => {
+                self.write_head = t;
+                Ok(())
+            }
+            None => Err(E::nothing_to_pop(span)),
+        }
+    }
+
+    fn do_fill<E>(
+        &mut self,
+        args: Vec<(Argument, Span)>,
+        span: Span,
+    ) -> Result<(), E>
+    where
+        E: ErrorHandler,
+    {
+        let mut args: VecDeque<_> = args.into_iter().collect();
+
+        let first_arg = match args.pop_front() {
+            None => return Err(E::fill_no_args(span)),
+            Some((Argument::Tuple(_), span)) => {
+                return Err(E::expected_atomic(
+                    "tuple",
+                    "FILL's first argument",
+                    span,
+                ))
+            }
+            Some((Argument::List(_), span)) => {
+                return Err(E::expected_atomic(
+                    "list",
+                    "FILL's first argument",
+                    span,
+                ))
+            }
+            Some((Argument::Single(expr), _)) => expr,
+        };
+
+        let fill_value = match args.pop_front() {
+            None => todo!(),
+            Some((Argument::Tuple(_), span)) => {
+                return Err(E::expected_atomic(
+                    "tuple",
+                    "FILL's second argument",
+                    span,
+                ))
+            }
+            Some((Argument::List(_), span)) => {
+                return Err(E::expected_atomic(
+                    "list",
+                    "FILL's second argument",
+                    span,
+                ))
+            }
+            Some((Argument::Single(expr), _)) => todo!(),
+        };
     }
 }
 
@@ -107,13 +321,19 @@ impl<B> Assembler<B> {
 struct Backlink {}
 
 // INVARIANT: The keysets of each hashmap are disjoint.
+// INVARIANT: No hashmap contains the key [currentOffset]
 struct SymbolTable {
     scopes: NonEmpty<HashMap<String, Entry>>,
 }
 
 enum Entry {
+    // XXX: Currently, we only check whether a label is "good" (e.g., fits in
+    // an [i32]) when evaluating expressions. In theory, we should be guarding
+    // every time the write head moves so we can immediately error when the
+    // write head goes too far.
     Known(usize, Span),
-    // The span refers to the location of the first-encountered backlink
+    // The span refers to the location of the first forward reference
+    // encountered
     Forwards(NonEmpty<Backlink>, Span),
 }
 
@@ -132,7 +352,12 @@ impl SymbolTable {
         self.scopes.pop().map(|_| ())
     }
 
-    pub fn register_label<E>(
+    pub fn lookup(&self, s: &String) -> Option<i32> {
+        // iterate backwards through [self.scopes]
+        todo!()
+    }
+
+    pub fn set_label_to_offset<E>(
         &mut self,
         symbol: String,
         offs: usize,
@@ -141,6 +366,10 @@ impl SymbolTable {
     where
         E: ErrorHandler,
     {
+        if symbol.as_str() == "currentOffset" {
+            return Err(E::cant_redefine_currentOffset(span));
+        }
+
         let n = self.scopes.len();
 
         let result = match self.scopes.last_mut().remove(&symbol) {

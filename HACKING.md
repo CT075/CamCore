@@ -18,5 +18,6 @@ There are several places where we use the type `Option<Vec<T>>` for some `T`,
 in which `Some([])` is invalid. In other places, we simply use `Vec<T>` to
 represent a structure in which "empty list of args" gets special handling. In
 both cases, we should instead use `Option<NonEmptyVec<T>>` to make the
-semantics clearer.
+semantics clearer. Related to this is the pervasive use of `Result<T, Vec<E>>`,
+which has the same issue (in which `Err([])` is impossible).
 
