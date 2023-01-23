@@ -83,7 +83,7 @@ pub trait ErrorHandler: 'static {
     fn io_error(underlying: std::io::Error, span: Span) -> Self;
 }
 
-// XXX: it'd be nice if we could somehow make this vector static
+// XXX: it'd be nice if we could somehow make this vector static/const
 fn builtins() -> HashMap<String, Definition> {
     vec![
         ("__LINE__", Definition::Reserved),
@@ -735,6 +735,7 @@ where
     Ok((args, arg_span.clone()))
 }
 
+// TODO: currentOffset
 fn lookup_symbol_for_rendering<E>(
     defines: &HashMap<String, Definition>,
     symbol: &String,

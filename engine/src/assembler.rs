@@ -2,10 +2,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use nonempty::{nonempty, NonEmpty};
 
-use crate::lang::{
-    parse::{Argument, Event},
-    syntax,
-    syntax::{Expr, Operator, Span, Spanned},
+use crate::{
+    lang::{
+        parse::{Argument, Event},
+        syntax,
+        syntax::{Expr, Operator, Span, Spanned},
+    },
+    plumbing::*,
 };
 
 pub trait ErrorHandler: 'static {
@@ -21,8 +24,7 @@ pub trait ErrorHandler: 'static {
         defn_loc: Span,
     ) -> Self;
 
-    #[allow(non_snake_case)]
-    fn cant_redefine_currentOffset(span: Span) -> Self;
+    fn cant_redefine_builtin(what: &'static str, span: Span) -> Self;
 
     fn unmatched_close_scope(span: Span) -> Self;
 
@@ -193,7 +195,7 @@ impl<B> Assembler<B> {
     // (namely, ORG) don't permit them, so we only take [&self] instead of
     // [&mut self].
     fn eval(&self, exp: Expr) -> EvalResult {
-        eval_impl(exp, |s| self.symbols.lookup(s))
+        eval_impl(exp, |s| self.symbols.lookup(s).map(fst))
     }
 
     fn do_org<E>(
@@ -296,8 +298,9 @@ impl<B> Assembler<B> {
             Some((Argument::Single(expr), _)) => expr,
         };
 
+        // TODO: size?
         let fill_value = match args.pop_front() {
-            None => todo!(),
+            None => 0,
             Some((Argument::Tuple(_), span)) => {
                 return Err(E::expected_atomic(
                     "tuple",
@@ -312,8 +315,12 @@ impl<B> Assembler<B> {
                     span,
                 ))
             }
-            Some((Argument::Single(expr), _)) => todo!(),
+            Some((Argument::Single(expr), _)) => match self.eval(expr) {
+                _ => todo!(),
+            },
         };
+
+        todo!()
     }
 }
 
@@ -321,16 +328,12 @@ impl<B> Assembler<B> {
 struct Backlink {}
 
 // INVARIANT: The keysets of each hashmap are disjoint.
-// INVARIANT: No hashmap contains the key [currentOffset]
+// INVARIANT: No hashmap contains any reserved key
 struct SymbolTable {
     scopes: NonEmpty<HashMap<String, Entry>>,
 }
 
 enum Entry {
-    // XXX: Currently, we only check whether a label is "good" (e.g., fits in
-    // an [i32]) when evaluating expressions. In theory, we should be guarding
-    // every time the write head moves so we can immediately error when the
-    // write head goes too far.
     Known(usize, Span),
     // The span refers to the location of the first forward reference
     // encountered
@@ -352,9 +355,18 @@ impl SymbolTable {
         self.scopes.pop().map(|_| ())
     }
 
-    pub fn lookup(&self, s: &String) -> Option<i32> {
-        // iterate backwards through [self.scopes]
-        todo!()
+    pub fn lookup(&self, s: &String) -> Option<Spanned<i32>> {
+        // XXX: Currently, we only check whether a label is "good" (e.g., fits
+        // in an [i32]) when evaluating expressions. In theory, we should be
+        // guarding twrite head moves so we can immediately error when the
+        // write head goes too far.
+        for scope in self.scopes.iter().rev() {
+            if let Some(Entry::Known(v, span)) = scope.get(s) {
+                return Some((*v as i32, span.clone()));
+            }
+        }
+
+        None
     }
 
     pub fn set_label_to_offset<E>(
@@ -367,7 +379,7 @@ impl SymbolTable {
         E: ErrorHandler,
     {
         if symbol.as_str() == "currentOffset" {
-            return Err(E::cant_redefine_currentOffset(span));
+            return Err(E::cant_redefine_builtin("currentOffset", span));
         }
 
         let n = self.scopes.len();
