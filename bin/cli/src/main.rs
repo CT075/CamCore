@@ -1,8 +1,16 @@
 use std::path::PathBuf;
 
-use clap::{ArgAction, Parser};
+use clap::{ArgAction, Parser, ValueEnum};
 
 mod errors;
+
+#[derive(Debug, Clone, ValueEnum)]
+enum Phase {
+    ///
+    Lexing,
+    ///
+    Preprocessing,
+}
 
 #[derive(Debug, Parser)]
 #[command(name = "CamCore")]
@@ -11,6 +19,7 @@ mod errors;
 #[command(bin_name = "camcore")]
 #[command(about = "An Event Assembler", long_about = None)]
 struct Cli {
+    /// The list of files to assemble.
     inputs: Vec<String>,
     /// The game to assemble for. Case-insensitive.
     ///
@@ -40,6 +49,12 @@ struct Cli {
     /// and NLCore/ColorzCore.
     #[arg(long)]
     no_legacy_cli_checks: bool,
+    /// Predefine macros or definitions
+    #[arg(short = 'D', long)]
+    defines: Vec<String>,
+    /// Stop assembly after the given phase
+    #[arg(long)]
+    stop_after: Phase,
 }
 
 fn main() {

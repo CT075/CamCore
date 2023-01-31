@@ -709,7 +709,7 @@ where
     token_separator().ignore_then(choice((message, directive, line)))
 }
 
-pub fn tree<E>() -> impl Parser<char, Tree, Error = Carrier<E>> + Clone
+fn tree<E>() -> impl Parser<char, Tree, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {

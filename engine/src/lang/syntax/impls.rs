@@ -12,7 +12,7 @@ impl std::fmt::Display for Token {
                 10 => write!(f, "{}", payload),
                 16 => write!(f, "0x{}", payload),
                 2 => write!(f, "{}b", payload),
-                _ => write!(f, "/*[BUG: unknown radix]*/{}", payload),
+                _ => write!(f, "/*[BUG: unknown radix {}]*/{}", radix, payload),
             },
             QuotedString(s) => write!(f, r#""{}""#, s),
             Colon => write!(f, ":"),
