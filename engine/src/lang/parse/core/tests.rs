@@ -78,6 +78,7 @@ const BASIC_SPAN: Span = Span {
 
 type UnspannedArgument = syntax::Argument<IdentityW>;
 type UnspannedStatement = syntax::Statement<IdentityW>;
+type UnspannedEvent = syntax::Event<IdentityW>;
 
 fn strip_span_arg(arg: Argument) -> UnspannedArgument {
     match arg {
@@ -106,23 +107,30 @@ fn strip_span_stmt(stmt: Statement) -> UnspannedStatement {
     }
 }
 
+fn strip_span_event(evt: Event) -> UnspannedEvent {
+    match evt {
+        Event::Statement(s) => UnspannedEvent::Statement(strip_span_stmt(s)),
+        Event::OpenScope => UnspannedEvent::OpenScope,
+        Event::CloseScope => UnspannedEvent::CloseScope,
+    }
+}
+
 fn parse_line_no_span(
     toks: Vec<Token>,
-) -> Result<Vec<UnspannedStatement>, Vec<Error>> {
+) -> Result<Vec<UnspannedEvent>, Vec<Error>> {
     super::parse_line(
         toks.into_iter().map(|x| (x, BASIC_SPAN.clone())).collect(),
     )
-    .map(|stmts| {
-        stmts
-            .into_iter()
-            .map(|(stmt, _span)| strip_span_stmt(stmt))
+    .map(|evts| {
+        evts.into_iter()
+            .map(|(evt, _span)| strip_span_event(evt))
             .collect()
     })
 }
 
 #[test]
 fn basic_statement() {
-    let expected = UnspannedStatement::Instruction {
+    let expected = UnspannedEvent::Statement(UnspannedStatement::Instruction {
         head: Rc::new("t".to_owned()),
         args: vec![
             (UnspannedArgument::Single(Expr::Binop(
@@ -135,7 +143,7 @@ fn basic_statement() {
                 Box::new(Expr::Var(Rc::new("v".to_owned()))),
             ))),
         ],
-    };
+    });
 
     // t (X ^ g) | v
     let actual: Result<_, Vec<Error>> = parse_line_no_span(vec![
@@ -154,7 +162,7 @@ fn basic_statement() {
 
 #[test]
 fn tuple_arg() {
-    let expected = UnspannedStatement::Instruction {
+    let expected = UnspannedEvent::Statement(UnspannedStatement::Instruction {
         head: Rc::new("t".to_owned()),
         args: vec![
             UnspannedArgument::Tuple(vec![
@@ -184,7 +192,7 @@ fn tuple_arg() {
                 Box::new(Expr::Var(Rc::new("e".to_owned()))),
             )),
         ],
-    };
+    });
 
     // t (X ^ g | v, q) (a + b) + c (d + e)
     let actual: Result<_, Vec<Error>> = parse_line_no_span(vec![

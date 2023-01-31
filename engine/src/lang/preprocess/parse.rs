@@ -6,7 +6,8 @@ use relative_path::RelativePathBuf;
 
 use crate::{
     lang::{
-        parse::common::{Carrier, GenericParseErrorHandler},
+        parse,
+        parse::common::GenericParseErrorHandler,
         syntax::{
             span::{stream_spanned, Source},
             Directive, GroupKind, MacroBody, Node, Span, Spanned, Token,
@@ -55,7 +56,11 @@ pub enum PpSyntaxKind {
     IfBody(&'static str),
 }
 
-impl<E> ChumskyError<char> for Carrier<char, E>
+enum W {}
+
+type Carrier<E> = parse::common::Carrier<char, E, W>;
+
+impl<E> ChumskyError<char> for Carrier<E>
 where
     E: ErrorHandler,
 {
@@ -108,6 +113,7 @@ where
                 found: _,
             } => unclosed_span,
             Carrier::Specific(_) => return self,
+            Carrier::Tag(_, seal) => match seal {},
         };
 
         use PpSyntaxKind::*;
@@ -119,7 +125,7 @@ where
     }
 }
 
-fn line_comment<E>() -> impl Parser<char, (), Error = Carrier<char, E>> + Clone
+fn line_comment<E>() -> impl Parser<char, (), Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -145,7 +151,7 @@ where
 //
 // After gaining more experience with the library, I think there's probably a
 // way to do this using the [nested_delimiters] recovery strategy.
-fn block_comment<E>() -> impl Parser<char, (), Error = Carrier<char, E>> + Clone
+fn block_comment<E>() -> impl Parser<char, (), Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -180,8 +186,7 @@ where
     .ignored()
 }
 
-fn rest_of_line<E>(
-) -> impl Parser<char, String, Error = Carrier<char, E>> + Clone
+fn rest_of_line<E>() -> impl Parser<char, String, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -203,8 +208,7 @@ where
     .then_ignore(just('\n').ignored().or(line_comment()))
 }
 
-fn non_nl_whitespace<E>(
-) -> impl Parser<char, char, Error = Carrier<char, E>> + Clone
+fn non_nl_whitespace<E>() -> impl Parser<char, char, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -221,7 +225,7 @@ fn parse_string_with_vars<E, F>(
 ) -> StringWithVars
 where
     E: ErrorHandler,
-    F: FnMut(Carrier<char, E>) -> () + ?Sized,
+    F: FnMut(Carrier<E>) -> () + ?Sized,
 {
     match StringWithVars::parse(Some(span.source()), Some(span.start()), &s) {
         Ok(s) => s,
@@ -234,11 +238,9 @@ where
     }
 }
 
-fn command_line<E>() -> impl Parser<
-    char,
-    (RelativePathBuf, Vec<StringWithVars>),
-    Error = Carrier<char, E>,
-> + Clone
+fn command_line<E>(
+) -> impl Parser<char, (RelativePathBuf, Vec<StringWithVars>), Error = Carrier<E>>
+       + Clone
 where
     E: ErrorHandler,
 {
@@ -265,8 +267,7 @@ where
         })
 }
 
-fn path<E>(
-) -> impl Parser<char, RelativePathBuf, Error = Carrier<char, E>> + Clone
+fn path<E>() -> impl Parser<char, RelativePathBuf, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -306,8 +307,8 @@ where
 }
 
 fn if_<E>(
-    tree: impl Parser<char, Tree, Error = Carrier<char, E>> + Clone,
-) -> impl Parser<char, (Tree, Tree), Error = Carrier<char, E>> + Clone
+    tree: impl Parser<char, Tree, Error = Carrier<E>> + Clone,
+) -> impl Parser<char, (Tree, Tree), Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -323,7 +324,7 @@ where
 }
 
 // XXX: Quotes are the actual bane of my existence.
-fn define<E>() -> impl Parser<char, Directive, Error = Carrier<char, E>> + Clone
+fn define<E>() -> impl Parser<char, Directive, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -408,8 +409,8 @@ where
 }
 
 fn directive<E>(
-    tree: impl Parser<char, Tree, Error = Carrier<char, E>> + Clone,
-) -> impl Parser<char, Directive, Error = Carrier<char, E>> + Clone
+    tree: impl Parser<char, Tree, Error = Carrier<E>> + Clone,
+) -> impl Parser<char, Directive, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -492,8 +493,7 @@ where
     )
 }
 
-fn number<E>(
-) -> impl Parser<char, (String, usize), Error = Carrier<char, E>> + Clone
+fn number<E>() -> impl Parser<char, (String, usize), Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -524,8 +524,7 @@ where
     hex.or(bin_or_dec)
 }
 
-fn quoted_string<E>(
-) -> impl Parser<char, String, Error = Carrier<char, E>> + Clone
+fn quoted_string<E>() -> impl Parser<char, String, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -557,8 +556,7 @@ where
         .collect::<String>()
 }
 
-fn token_separator<E>(
-) -> impl Parser<char, (), Error = Carrier<char, E>> + Clone
+fn token_separator<E>() -> impl Parser<char, (), Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -584,7 +582,7 @@ where
 // ```
 // A /* comment without a line break */ B
 // ```
-fn end_of_line<E>() -> impl Parser<char, (), Error = Carrier<char, E>> + Clone
+fn end_of_line<E>() -> impl Parser<char, (), Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -597,7 +595,7 @@ where
         .to(())
 }
 
-fn token<E>() -> impl Parser<char, Token, Error = Carrier<char, E>> + Clone
+fn token<E>() -> impl Parser<char, Token, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -637,11 +635,11 @@ where
 // TODO: We should have better error reporting/recovery for mismatched
 // parentheses. Try using the [nested_delimiters] recovery strategy.
 fn delimited_group_parser<E>(
-    token_group: impl Parser<char, TokenGroup, Error = Carrier<char, E>> + Clone,
+    token_group: impl Parser<char, TokenGroup, Error = Carrier<E>> + Clone,
     l: &'static str,
     r: &'static str,
     kind: GroupKind,
-) -> impl Parser<char, TokenGroup, Error = Carrier<char, E>> + Clone
+) -> impl Parser<char, TokenGroup, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -653,8 +651,7 @@ where
         .map(move |members| TokenGroup::Group { kind, members })
 }
 
-fn token_group<E>(
-) -> impl Parser<char, TokenGroup, Error = Carrier<char, E>> + Clone
+fn token_group<E>() -> impl Parser<char, TokenGroup, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -670,7 +667,7 @@ where
 }
 
 fn line<E>(
-) -> impl Parser<char, Vec<Spanned<TokenGroup>>, Error = Carrier<char, E>> + Clone
+) -> impl Parser<char, Vec<Spanned<TokenGroup>>, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -681,8 +678,8 @@ where
 }
 
 fn node<E>(
-    tree: impl Parser<char, Tree, Error = Carrier<char, E>> + Clone,
-) -> impl Parser<char, Node, Error = Carrier<char, E>> + Clone
+    tree: impl Parser<char, Tree, Error = Carrier<E>> + Clone,
+) -> impl Parser<char, Node, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {
@@ -712,7 +709,7 @@ where
     token_separator().ignore_then(choice((message, directive, line)))
 }
 
-pub fn tree<E>() -> impl Parser<char, Tree, Error = Carrier<char, E>> + Clone
+pub fn tree<E>() -> impl Parser<char, Tree, Error = Carrier<E>> + Clone
 where
     E: ErrorHandler,
 {

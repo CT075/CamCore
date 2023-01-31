@@ -106,7 +106,7 @@ impl super::ErrorHandler for Error {
 }
 
 fn run_parser<O>(
-    parser: impl Parser<char, O, Error = Carrier<char, Error>>,
+    parser: impl Parser<char, O, Error = Carrier<Error>>,
     text: &'static str,
 ) -> Result<O, Vec<Error>> {
     parser

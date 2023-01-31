@@ -117,7 +117,7 @@ impl<T> Clone for ConstW<T> {
 impl<T> Copy for ConstW<T> {}
 
 impl<T> PartialEq for ConstW<T> {
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, _other: &Self) -> bool {
         true
     }
 }
@@ -127,7 +127,7 @@ impl<T> Eq for ConstW<T> {}
 impl<T> std::fmt::Debug for ConstW<T> {
     fn fmt(
         &self,
-        f: &mut std::fmt::Formatter<'_>,
+        _f: &mut std::fmt::Formatter<'_>,
     ) -> Result<(), std::fmt::Error> {
         match self.seal {}
     }
