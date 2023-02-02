@@ -1,0 +1,170 @@
+---
+source: engine/src/lang/preprocess/parse/tests.rs
+expression: "parse(r#\"/**/ / */**/ * / /// this is a comment\"#)"
+---
+Ok(
+    Tree(
+        [
+            (
+                Line(
+                    [
+                        (
+                            Single(
+                                (
+                                    Slash,
+                                    Span {
+                                        source: File(
+                                            "test.event",
+                                        ),
+                                        span: Position {
+                                            offset: 5,
+                                            row: 0,
+                                            col: 5,
+                                        }..Position {
+                                            offset: 6,
+                                            row: 0,
+                                            col: 6,
+                                        },
+                                    },
+                                ),
+                            ),
+                            Span {
+                                source: File(
+                                    "test.event",
+                                ),
+                                span: Position {
+                                    offset: 5,
+                                    row: 0,
+                                    col: 5,
+                                }..Position {
+                                    offset: 7,
+                                    row: 0,
+                                    col: 7,
+                                },
+                            },
+                        ),
+                        (
+                            Single(
+                                (
+                                    Star,
+                                    Span {
+                                        source: File(
+                                            "test.event",
+                                        ),
+                                        span: Position {
+                                            offset: 7,
+                                            row: 0,
+                                            col: 7,
+                                        }..Position {
+                                            offset: 8,
+                                            row: 0,
+                                            col: 8,
+                                        },
+                                    },
+                                ),
+                            ),
+                            Span {
+                                source: File(
+                                    "test.event",
+                                ),
+                                span: Position {
+                                    offset: 7,
+                                    row: 0,
+                                    col: 7,
+                                }..Position {
+                                    offset: 13,
+                                    row: 0,
+                                    col: 13,
+                                },
+                            },
+                        ),
+                        (
+                            Single(
+                                (
+                                    Star,
+                                    Span {
+                                        source: File(
+                                            "test.event",
+                                        ),
+                                        span: Position {
+                                            offset: 13,
+                                            row: 0,
+                                            col: 13,
+                                        }..Position {
+                                            offset: 14,
+                                            row: 0,
+                                            col: 14,
+                                        },
+                                    },
+                                ),
+                            ),
+                            Span {
+                                source: File(
+                                    "test.event",
+                                ),
+                                span: Position {
+                                    offset: 13,
+                                    row: 0,
+                                    col: 13,
+                                }..Position {
+                                    offset: 15,
+                                    row: 0,
+                                    col: 15,
+                                },
+                            },
+                        ),
+                        (
+                            Single(
+                                (
+                                    Slash,
+                                    Span {
+                                        source: File(
+                                            "test.event",
+                                        ),
+                                        span: Position {
+                                            offset: 15,
+                                            row: 0,
+                                            col: 15,
+                                        }..Position {
+                                            offset: 16,
+                                            row: 0,
+                                            col: 16,
+                                        },
+                                    },
+                                ),
+                            ),
+                            Span {
+                                source: File(
+                                    "test.event",
+                                ),
+                                span: Position {
+                                    offset: 15,
+                                    row: 0,
+                                    col: 15,
+                                }..Position {
+                                    offset: 17,
+                                    row: 0,
+                                    col: 17,
+                                },
+                            },
+                        ),
+                    ],
+                ),
+                Span {
+                    source: File(
+                        "test.event",
+                    ),
+                    span: Position {
+                        offset: 0,
+                        row: 0,
+                        col: 0,
+                    }..Position {
+                        offset: 39,
+                        row: 1,
+                        col: 0,
+                    },
+                },
+            ),
+        ],
+    ),
+)

@@ -1,0 +1,31 @@
+---
+source: engine/src/lang/preprocess/parse/tests.rs
+expression: "parse(r#\"#include A/B/C // a b c\"#)"
+---
+Ok(
+    Tree(
+        [
+            (
+                Directive(
+                    Include(
+                        "A/B/C",
+                    ),
+                ),
+                Span {
+                    source: File(
+                        "test.event",
+                    ),
+                    span: Position {
+                        offset: 0,
+                        row: 0,
+                        col: 0,
+                    }..Position {
+                        offset: 24,
+                        row: 1,
+                        col: 0,
+                    },
+                },
+            ),
+        ],
+    ),
+)

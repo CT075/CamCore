@@ -1,0 +1,35 @@
+---
+source: engine/src/lang/preprocess/parse/tests.rs
+expression: "parse(r#\"MESSAGE this message / /* contains */ // comments\"#)"
+---
+Ok(
+    Tree(
+        [
+            (
+                Message(
+                    S(
+                        [
+                            Text(
+                                "this message /",
+                            ),
+                        ],
+                    ),
+                ),
+                Span {
+                    source: File(
+                        "test.event",
+                    ),
+                    span: Position {
+                        offset: 0,
+                        row: 0,
+                        col: 0,
+                    }..Position {
+                        offset: 50,
+                        row: 1,
+                        col: 0,
+                    },
+                },
+            ),
+        ],
+    ),
+)

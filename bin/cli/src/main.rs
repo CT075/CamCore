@@ -1,6 +1,7 @@
-use std::path::PathBuf;
+use std::{collections::VecDeque, path::PathBuf};
 
 use clap::{ArgAction, Parser, ValueEnum};
+use colored::Colorize;
 
 mod errors;
 
@@ -19,7 +20,7 @@ enum Phase {
 #[command(bin_name = "camcore")]
 #[command(about = "An Event Assembler", long_about = None)]
 struct Cli {
-    /// The list of files to assemble.
+    /// The list of files to assemble. Files will be read in the order given.
     inputs: Vec<String>,
     /// The game to assemble for. Case-insensitive.
     ///
@@ -27,38 +28,51 @@ struct Cli {
     /// is also used by the raws engine to restrict which raws are available.
     #[arg(short, long)]
     game: Option<String>,
-    /// Sets the verbosity level. Can be repeated up to 3 times, e.g. -vvv.
-    #[arg(short, long, action = ArgAction::Count)]
-    verbose: u8,
-    /// Output debug information. Implies -vvv.
-    #[arg(long)]
-    debug: bool,
-    /// Suppress all non-error messages. Mutually exclusive with --verbose.
-    #[arg(short, long)]
-    quiet: bool,
-    /// Display build times after assembly.
-    #[arg(long)]
-    build_times: bool,
-    /// Output defines and top-level symbols as a no$-compatible .sym file.
-    #[arg(long)]
-    nocash_sym: Option<PathBuf>,
+    // /// Sets the verbosity level. Can be repeated up to 3 times, e.g. -vvv.
+    //#[arg(short, long, action = ArgAction::Count)]
+    //verbose: u8,
+    // /// Output debug information. Implies -vvv.
+    //#[arg(long)]
+    //debug: bool,
+    // /// Suppress all non-error messages. Mutually exclusive with --verbose.
+    //#[arg(short, long)]
+    //quiet: bool,
+    // /// Display build times after assembly.
+    //#[arg(long)]
+    //build_times: bool,
+    // /// Output defines and top-level symbols as a no$-compatible .sym file.
+    //#[arg(long)]
+    //nocash_sym: Option<PathBuf>,
     /// Display colored error output. Default true.
     #[arg(long, default_value_t = true)]
     color: bool,
-    /// Disables safeguards on the differences between this program's interface
-    /// and NLCore/ColorzCore.
+    /// Disables legacy cli mode.
     #[arg(long)]
-    no_legacy_cli_checks: bool,
+    no_legacy_cli: bool,
     /// Predefine macros or definitions
     #[arg(short = 'D', long)]
     defines: Vec<String>,
     /// Stop assembly after the given phase
     #[arg(long)]
-    stop_after: Phase,
+    stop_after: Option<Phase>,
 }
 
 fn main() {
     let cli = Cli::parse();
 
-    println!("{:?}\n", cli);
+    let check_legacy_args = !cli.no_legacy_cli;
+
+    let mut inputs_iterator = cli.inputs.into_iter();
+
+    match inputs_iterator.next() {
+        None => {
+            print!("{} no input files", "error:".red());
+            return;
+        }
+        Some(v) => {
+            if check_legacy_args && v == "A" {
+            } else {
+            }
+        }
+    }
 }
