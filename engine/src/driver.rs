@@ -18,7 +18,6 @@ pub trait OutputSink<E> {
     fn push_error(&mut self, e: E);
 }
 
-// TODO: make this a trait?
 struct Driver<Sink, E> {
     sink: Sink,
     phantom: std::marker::PhantomData<E>,

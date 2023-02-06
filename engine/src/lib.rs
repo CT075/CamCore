@@ -1,7 +1,7 @@
 pub mod driver;
 pub mod io;
 pub mod lang;
-mod plumbing;
+pub mod plumbing;
 mod raws;
 pub mod types;
 

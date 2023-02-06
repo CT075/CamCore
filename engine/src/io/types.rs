@@ -2,6 +2,20 @@ use std::path::{Path, PathBuf};
 
 use relative_path::RelativePath;
 
+pub struct FileContents<P> {
+    pub source: P,
+    pub contents: String,
+}
+
+impl<P> FileContents<P>
+where
+    P: AsRef<Path>,
+{
+    pub fn new(source: P, contents: String) -> Self {
+        Self { source, contents }
+    }
+}
+
 pub trait ErrorHandler: 'static {
     fn os_error(underlying: std::io::Error) -> Self;
 

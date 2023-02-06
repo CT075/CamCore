@@ -24,14 +24,15 @@ use indexmap::IndexSet;
 use relative_path::RelativePath;
 
 use crate::{
-    io::ErrorHandler as IOErrorHandler,
+    io::{ErrorHandler as IOErrorHandler, FileContents},
     plumbing::*,
     types::{LinkedList, StringWithVars},
 };
 
 use super::syntax::{
-    span::Source, Directive, GroupKind, MacroBody, Node, Span, Spanned, Token,
-    TokenGroup, Tree,
+    span::{Position, Source},
+    Directive, GroupKind, MacroBody, Node, Span, Spanned, Token, TokenGroup,
+    Tree,
 };
 
 // TODO: adjust these to include [VerboseContext] or something where necessary
@@ -95,22 +96,48 @@ fn builtins() -> HashMap<String, Definition> {
     .collect()
 }
 
-pub fn drive<E, D>(driver: D, file: impl AsRef<Path>, contents: String) -> D
+pub fn drive<E, D, P>(
+    driver: D,
+    game: String,
+    files: impl Iterator<Item = FileContents<P>>,
+) -> D
 where
     E: ErrorHandler + parse::ErrorHandler,
     D: Driver<E>,
+    P: AsRef<Path>,
 {
+    let mut defines = builtins();
+
+    // TODO: do something better here
+    defines.insert(
+        game,
+        Definition::Empty(Span {
+            source: Source::Unknown,
+            span: Position {
+                offset: 0,
+                row: 0,
+                col: 0,
+            }..Position {
+                offset: 0,
+                row: 0,
+                col: 0,
+            },
+        }),
+    );
+
     let mut context: Context<_, E> = Context {
         driver,
-        defines: builtins(),
+        defines,
         phantom: PhantomData,
     };
 
-    context.process(
-        &Source::File(Rc::new(file.as_ref().to_path_buf())),
-        contents,
-        id,
-    );
+    for FileContents { source, contents } in files {
+        context.process(
+            &Source::File(Rc::new(source.as_ref().to_path_buf())),
+            contents,
+            id,
+        );
+    }
 
     context.driver
 }
